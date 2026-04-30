@@ -52,7 +52,10 @@ def get_weather():
 
 # ── 성무일도 ───────────────────────────────────────────
 def get_liturgy():
-    """catholic.or.kr 성무일도 본문 스크래핑"""
+    """catholic.or.kr 성무일도 본문 스크래핑
+    페이지 안의 <table> 중 '주여, 내 입시울을 열어' 텍스트가 포함된
+    테이블부터 끝까지 추출합니다.
+    """
     try:
         url = "https://maria.catholic.or.kr/mi_pr/sungmu/sungmu.asp"
         headers = {"User-Agent": "Mozilla/5.0"}
@@ -60,17 +63,34 @@ def get_liturgy():
         r.encoding = "euc-kr"
         soup = BeautifulSoup(r.text, "html.parser")
 
-        # 사이드메뉴 제거 — 사이트 구조에 맞게 선택자 조정 필요
-        for tag in soup.select(".leftmenu, .sidemenu, #leftmenu, #sidemenu, .gnb"):
-            tag.decompose()
+        # 모든 테이블 중 '주여, 내 입시울을 열어'가 포함된 것부터 수집
+        tables = soup.find_all("table")
+        target_tables = []
+        found = False
+        for table in tables:
+            text_in_table = table.get_text()
+            if not found and ("입시울" in text_in_table or "주여" in text_in_table):
+                found = True
+            if found:
+                target_tables.append(table)
 
-        # 본문 영역 추출 (td.body_text 또는 div.content 등 사이트 구조에 따라 조정)
-        body = soup.select_one("td.body_text") or soup.select_one(".content_area") or soup.find("body")
-        text = body.get_text(separator="\n").strip() if body else "본문 없음"
+        if not target_tables:
+            return "성무일도 본문을 찾지 못했습니다."
 
-        # 연속 빈 줄 정리
-        lines = [l for l in text.splitlines() if l.strip()]
-        return "\n".join(lines)
+        # 추출된 테이블들의 텍스트를 합치기
+        result_lines = []
+        for table in target_tables:
+            text = table.get_text(separator="\n")
+            for line in text.splitlines():
+                line = line.strip()
+                # 푸터/저작권 등 불필요한 줄 제거
+                if line and not any(kw in line for kw in [
+                    "goodnews", "catholic.or.kr", "서울대교구", "이용약관",
+                    "개인정보", "ⓒ", "quick", "글자크기"
+                ]):
+                    result_lines.append(line)
+
+        return "\n".join(result_lines)
     except Exception as e:
         return f"성무일도 오류: {e}"
 
@@ -217,7 +237,7 @@ def main():
         }
     }
 
-    with open("report.json", "w", encoding="utf-8-sig") as f:
+    with open("report.json", "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
 
     print("report.json 생성 완료!")
