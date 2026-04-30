@@ -127,7 +127,11 @@ def get_liturgy():
 
 # ── 오늘의 복음 ────────────────────────────────────────
 def get_gospel():
-    """catholic.or.kr 미사 페이지에서 독서/복음 스크래핑"""
+    """catholic.or.kr 미사 페이지에서 독서/복음 스크래핑.
+    페이지의 <table> 태그 중 실제 본문이 담긴 것을 찾아
+    제1독서 / 제2독서 / 복음 구간을 텍스트 마커로 잘라냄.
+    """
+    import re
     result = {"reading1": "", "reading2": "", "gospel": ""}
     try:
         url = "https://maria.catholic.or.kr/mi_pr/missa/missa.asp"
@@ -136,53 +140,81 @@ def get_gospel():
         r.encoding = "utf-8"
         soup = BeautifulSoup(r.text, "html.parser")
 
-        # 사이드메뉴 제거
-        for tag in soup.select(".leftmenu, .sidemenu, #leftmenu, #sidemenu, .gnb"):
-            tag.decompose()
+        # 본문 테이블 찾기:
+        # "제1독서"와 (마태오|마르코|루카|요한)복음을 모두 포함한 테이블
+        gospel_pat = re.compile(r"(마태오|마르코|루카|요한).{0,5}복음")
+        body_table = None
+        for table in soup.find_all("table"):
+            t = table.get_text()
+            if "제1독서" in t and gospel_pat.search(t):
+                body_table = table
+                break
 
-        text = soup.get_text(separator="\n")
-        lines = [l.strip() for l in text.splitlines() if l.strip()]
+        if body_table is None:
+            result["reading1"] = "복음 본문 테이블을 찾지 못했습니다."
+            return result
 
-        # 제1독서, 제2독서, 복음 구간 파싱
-        # 복음 시작은 반드시 "○○복음" 형태 (마태오, 마르코, 루카, 요한 복음)
-        import re
-        gospel_pattern = re.compile(r"(마태오|마르코|루카|요한).{0,5}복음")
+        # 테이블 텍스트를 줄 단위로 분리
+        raw = body_table.get_text(separator="\n")
+        lines = [l.strip() for l in raw.splitlines() if l.strip()]
 
+        # 불필요 줄 필터 (메뉴·날짜 캘린더·성가 번호 등)
+        skip_patterns = [
+            r"^\d+일\(",          # 날짜 캘린더 (예: 26일(일))
+            r"^[A-Z][a-z]+ of ",  # 영문 전례명
+            r"^Feast of",
+            r"^Memorial of",
+            r"^Fourth |^Third |^Second |^First ",
+            r"소리매일미사|TV매일미사|전례력|미사통상문|인쇄",
+            r"굿뉴스 추천 성가",
+            r"입당 성가|입당성가",
+            r"묵시|참조$",
+            r"^\d{4}년 \d+월 \d+일",   # 날짜 헤더
+            r"^\[.*\]$",               # [(백) ...] 형태
+        ]
+        skip_re = [re.compile(p) for p in skip_patterns]
+
+        def should_skip(line):
+            return any(p.search(line) for p in skip_re)
+
+        # 섹션 파싱
         sections = {"reading1": [], "reading2": [], "gospel": []}
         current = None
+
         for line in lines:
             # 섹션 시작 감지
             if "제1독서" in line and current is None:
                 current = "reading1"
                 continue
-            elif "제2독서" in line and current == "reading1":
+            elif "제2독서" in line and current in ("reading1", None):
                 current = "reading2"
                 continue
-            elif gospel_pattern.search(line):
+            elif gospel_pat.search(line):
                 current = "gospel"
                 continue
 
+            # 섹션 종료 감지
             if current == "reading1":
-                if any(kw in line for kw in ["화답송", "알렐루야", "입당 성가", "입당성가", "제2독서"]):
+                if any(kw in line for kw in ["화답송", "알렐루야", "제2독서"]):
                     current = None
-                else:
-                    sections["reading1"].append(line)
-
+                    continue
             elif current == "reading2":
-                if any(kw in line for kw in ["화답송", "알렐루야", "입당 성가", "입당성가"]):
+                if any(kw in line for kw in ["화답송", "알렐루야"]):
                     current = None
-                else:
-                    sections["reading2"].append(line)
-
+                    continue
             elif current == "gospel":
-                if any(kw in line for kw in ["강론", "저작권", "입당 성가", "입당성가", "ⓒ"]):
+                if any(kw in line for kw in ["강론", "저작권", "ⓒ", "우리들의 묵상"]):
                     current = None
-                else:
-                    sections["gospel"].append(line)
+                    continue
+
+            # 내용 수집
+            if current and not should_skip(line):
+                sections[current].append(line)
 
         result["reading1"] = "\n".join(sections["reading1"])
         result["reading2"] = "\n".join(sections["reading2"])
         result["gospel"]   = "\n".join(sections["gospel"])
+
     except Exception as e:
         result["reading1"] = f"복음 오류: {e}"
     return result
