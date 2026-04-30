@@ -52,45 +52,53 @@ def get_weather():
 
 # ── 성무일도 ───────────────────────────────────────────
 def get_liturgy():
-    """catholic.or.kr 성무일도 본문 스크래핑
-    페이지 안의 <table> 중 '주여, 내 입시울을 열어' 텍스트가 포함된
-    테이블부터 끝까지 추출합니다.
+    """catholic.or.kr 성무일도 초대송 URL을 날짜 기반으로 직접 호출해서 본문 추출.
+    기본 페이지에는 본문이 없고, stype=inv 파라미터가 있는 URL에 본문이 있음.
     """
     try:
-        url = "https://maria.catholic.or.kr/mi_pr/sungmu/sungmu.asp"
+        date_str = today.strftime("%Y-%m-%d")
+        # 아침기도만 가져오기
+        stypes = ["mo"]
+        stype_names = {
+            "mo": "아침기도"
+        }
+
         headers = {"User-Agent": "Mozilla/5.0"}
-        r = requests.get(url, headers=headers, timeout=15)
-        r.encoding = "utf-8"
-        soup = BeautifulSoup(r.text, "html.parser")
+        all_text = []
 
-        # 모든 테이블 중 '주여, 내 입시울을 열어'가 포함된 것부터 수집
-        tables = soup.find_all("table")
-        target_tables = []
-        found = False
-        for table in tables:
-            text_in_table = table.get_text()
-            if not found and ("입시울" in text_in_table or "주여" in text_in_table):
-                found = True
-            if found:
-                target_tables.append(table)
+        for stype in stypes:
+            url = (
+                f"https://maria.catholic.or.kr/mi_pr/sungmu/sungmu.asp"
+                f"?menu=sungmu&sunseo=1&gomonth={date_str}&stype={stype}"
+            )
+            r = requests.get(url, headers=headers, timeout=15)
+            r.encoding = "utf-8"
+            soup = BeautifulSoup(r.text, "html.parser")
 
-        if not target_tables:
+            # 본문 테이블 찾기 — 내용이 있는 td 추출
+            tables = soup.find_all("table")
+            section_lines = []
+            for table in tables:
+                text = table.get_text(separator="\n")
+                # 내용이 있는 테이블만 (메뉴/푸터 제외)
+                if any(kw in text for kw in ["주여", "시편", "찬미", "기도", "주님", "하느님"]):
+                    for line in text.splitlines():
+                        line = line.strip()
+                        if line and not any(bad in line for bad in [
+                            "goodnews", "catholic.or.kr", "서울대교구",
+                            "이용약관", "개인정보", "ⓒ", "quick", "글자크기",
+                            "매일미사", "가톨릭기도서", "7성사", "성무일도"
+                        ]):
+                            section_lines.append(line)
+
+            if section_lines:
+                all_text.append(f"=== {stype_names.get(stype, stype)} ===")
+                all_text.extend(section_lines)
+
+        if not all_text:
             return "성무일도 본문을 찾지 못했습니다."
 
-        # 추출된 테이블들의 텍스트를 합치기
-        result_lines = []
-        for table in target_tables:
-            text = table.get_text(separator="\n")
-            for line in text.splitlines():
-                line = line.strip()
-                # 푸터/저작권 등 불필요한 줄 제거
-                if line and not any(kw in line for kw in [
-                    "goodnews", "catholic.or.kr", "서울대교구", "이용약관",
-                    "개인정보", "ⓒ", "quick", "글자크기"
-                ]):
-                    result_lines.append(line)
-
-        return "\n".join(result_lines)
+        return "\n".join(all_text)
     except Exception as e:
         return f"성무일도 오류: {e}"
 
