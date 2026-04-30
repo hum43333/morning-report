@@ -217,7 +217,7 @@ def main():
         }
     }
 
-    with open("report.json", "w", encoding="utf-8") as f:
+    with open("report.json", "w", encoding="utf-8-sig") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
 
     print("report.json 생성 완료!")
