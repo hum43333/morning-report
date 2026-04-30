@@ -219,24 +219,25 @@ def get_gospel():
 
 # ── 구글 캘린더 ────────────────────────────────────────
 def get_calendar_events(date: datetime.date) -> list:
-    """Google Calendar API로 특정 날짜의 일정 가져오기"""
-    if not GOOGLE_CALENDAR_CREDS:
-        return ["(캘린더 설정 필요)"]
+    """Google Calendar API — OAuth 토큰으로 인증해서 일정 가져오기.
+    구독 캘린더(@import.calendar.google.com 포함) 모두 접근 가능.
+    """
+    GOOGLE_OAUTH_TOKEN = os.environ.get("GOOGLE_OAUTH_TOKEN", "")
+    if not GOOGLE_OAUTH_TOKEN:
+        return ["(캘린더 설정 필요: GOOGLE_OAUTH_TOKEN)"]
     try:
-        import tempfile
-        from google.oauth2 import service_account
+        from google.oauth2.credentials import Credentials
         from googleapiclient.discovery import build
 
-        # Secrets에서 가져온 JSON 문자열을 임시 파일로 저장
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-            f.write(GOOGLE_CALENDAR_CREDS)
-            cred_path = f.name
-
-        creds = service_account.Credentials.from_service_account_file(
-            cred_path,
-            scopes=["https://www.googleapis.com/auth/calendar.readonly"]
+        token_data = json.loads(GOOGLE_OAUTH_TOKEN)
+        creds = Credentials(
+            token=token_data.get("token"),
+            refresh_token=token_data.get("refresh_token"),
+            token_uri=token_data.get("token_uri", "https://oauth2.googleapis.com/token"),
+            client_id=token_data.get("client_id"),
+            client_secret=token_data.get("client_secret"),
+            scopes=token_data.get("scopes"),
         )
-        os.unlink(cred_path)
 
         service = build("calendar", "v3", credentials=creds)
 
@@ -244,17 +245,32 @@ def get_calendar_events(date: datetime.date) -> list:
         start = datetime.datetime.combine(date, datetime.time.min).replace(tzinfo=KST).isoformat()
         end   = datetime.datetime.combine(date, datetime.time.max).replace(tzinfo=KST).isoformat()
 
-        events_result = service.events().list(
-            calendarId=CALENDAR_ID,
-            timeMin=start,
-            timeMax=end,
-            singleEvents=True,
-            orderBy="startTime"
-        ).execute()
+        # CALENDAR_ID 파싱
+        calendar_ids = [c.strip() for c in CALENDAR_ID.replace(';', ',').split(',') if '@' in c.strip()]
+        print(f"캘린더 ID 목록 ({len(calendar_ids)}개): {calendar_ids}")
 
-        events = events_result.get("items", [])
+        all_events = []
+        for cal_id in calendar_ids:
+            try:
+                events_result = service.events().list(
+                    calendarId=cal_id,
+                    timeMin=start,
+                    timeMax=end,
+                    singleEvents=True,
+                    orderBy="startTime"
+                ).execute()
+                all_events.extend(events_result.get("items", []))
+            except Exception:
+                continue
+
+        # 시작 시간 기준으로 정렬
+        def sort_key(e):
+            return e["start"].get("dateTime", e["start"].get("date", ""))
+
+        all_events.sort(key=sort_key)
+
         result = []
-        for e in events:
+        for e in all_events:
             start_val = e["start"].get("dateTime", e["start"].get("date", ""))
             if "T" in start_val:
                 t = datetime.datetime.fromisoformat(start_val).astimezone(KST)
