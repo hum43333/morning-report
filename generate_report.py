@@ -91,7 +91,6 @@ def get_liturgy():
             return "\n".join(fallback) if fallback else "아침기도 본문을 찾지 못했습니다."
 
         # 끝점: '파견'을 찾은 뒤 푸터가 나올 때 중단
-        # 파견을 못 찾아도 푸터에서 중단
         found_pagen = False
         end_idx = len(lines)
         for i in range(start_idx + 1, len(lines)):
@@ -100,13 +99,15 @@ def get_liturgy():
             # 파견 이후 푸터/메뉴 도달 시 종료
             if found_pagen and any(kw in lines[i] for kw in [
                 "이용약관", "ⓒ GoodNews", "서울대교구", "goodnews@",
-                "매일미사", "가톨릭기도서", "7성사"
+                "매일미사", "가톨릭기도서", "7성사",
+                "(구)성경쓰기", "미사/기도서", "말씀나누기", "성경책갈피", "내 교구"
             ]):
                 end_idx = i
                 break
             # 파견 미발견 상태에서 푸터 도달 시 종료
             if not found_pagen and any(kw in lines[i] for kw in [
-                "이용약관", "ⓒ GoodNews", "서울대교구", "goodnews@"
+                "이용약관", "ⓒ GoodNews", "서울대교구", "goodnews@",
+                "(구)성경쓰기", "미사/기도서"
             ]):
                 end_idx = i
                 break
@@ -128,9 +129,11 @@ def get_liturgy():
 # ── 오늘의 복음 ────────────────────────────────────────
 def get_gospel():
     """catholic.or.kr 미사 페이지에서 독서/복음 스크래핑.
-    - 제1독서: '제1독서' 줄부터 '화답송' 줄 직전까지
-    - 제2독서: '제2독서' 줄부터 '복음 환호송' or '알렐루야' 직전까지 (있을 때만)
-    - 복음:    '✠' 기호가 있는 줄부터 '주님의 말씀입니다' or '그리스도님, 찬미합니다' 까지
+    전략:
+    - 페이지에서 오늘 날짜 헤더(예: '2026년 4월 30일') 이후 구간만 파싱
+    - 제1독서: '제1독서' ~ '주님의 말씀입니다' (첫 번째)
+    - 제2독서: '제2독서' ~ '주님의 말씀입니다' (있을 때만)
+    - 복음:    '✠' 또는 '거룩한 복음' ~ '그리스도님, 찬미합니다'
     """
     import re
     result = {"reading1": "", "reading2": "", "gospel": ""}
@@ -141,49 +144,69 @@ def get_gospel():
         r.encoding = "utf-8"
         soup = BeautifulSoup(r.text, "html.parser")
 
-        # 전체 텍스트를 줄 단위로
         raw = soup.get_text(separator="\n")
         lines = [l.strip() for l in raw.splitlines() if l.strip()]
 
+        # ── 오늘 날짜 헤더 이후부터만 파싱 ──
+        # 예: "2026년 4월 30일" 형태
+        date_pattern = re.compile(r"\d{4}년 \d+월 \d+일")
+        body_start = 0
+        for i, line in enumerate(lines):
+            if date_pattern.search(line) and today.strftime("%Y년") in line:
+                body_start = i
+                break
+
+        lines = lines[body_start:]
+
         sections = {"reading1": [], "reading2": [], "gospel": []}
         current = None
+        reading1_done = False
 
         for line in lines:
 
-            # ── 섹션 시작 ──────────────────────────
-            if "제1독서" in line and current is None:
+            # ── 섹션 시작 ──────────────────────
+            if "제1독서" in line and current is None and not reading1_done:
                 current = "reading1"
                 continue
 
-            if "제2독서" in line and current in ("reading1", None):
+            if "제2독서" in line and current is None:
                 current = "reading2"
                 continue
 
-            # 복음 시작: ✠ 기호가 포함된 줄 (실제 복음 본문 시작)
-            if "✠" in line and current != "gospel":
+            # 복음 시작: ✠ 기호 또는 "거룩한 복음입니다"
+            if ("✠" in line or "거룩한 복음입니다" in line) and current != "gospel":
                 current = "gospel"
                 sections["gospel"].append(line)
                 continue
 
-            # ── 섹션 종료 ──────────────────────────
+            # ── 섹션 내용 수집 및 종료 ──────────
             if current == "reading1":
-                if any(kw in line for kw in ["화답송", "알렐루야", "제2독서", "복음 환호송"]):
+                # 제1독서 끝 마커
+                if "주님의 말씀입니다" in line or "하느님 감사합니다" in line:
+                    sections["reading1"].append(line)
                     current = None
-                    continue
-                sections["reading1"].append(line)
+                    reading1_done = True
+                elif any(kw in line for kw in ["화답송", "알렐루야", "복음 환호송", "제2독서"]):
+                    current = None
+                    reading1_done = True
+                else:
+                    sections["reading1"].append(line)
 
             elif current == "reading2":
-                if any(kw in line for kw in ["화답송", "알렐루야", "복음 환호송"]):
+                if "주님의 말씀입니다" in line or "하느님 감사합니다" in line:
+                    sections["reading2"].append(line)
                     current = None
-                    continue
-                sections["reading2"].append(line)
+                elif any(kw in line for kw in ["화답송", "알렐루야", "복음 환호송"]):
+                    current = None
+                else:
+                    sections["reading2"].append(line)
 
             elif current == "gospel":
                 sections["gospel"].append(line)
-                # 복음 끝: 응답송 끝 문구
-                if "그리스도님, 찬미합니다" in line or "주님의 말씀입니다" in line:
+                # 복음 끝 마커
+                if "그리스도님, 찬미합니다" in line:
                     current = None
-                    continue
+                    break  # 복음까지 완료되면 파싱 종료
 
         result["reading1"] = "\n".join(sections["reading1"])
         result["reading2"] = "\n".join(sections["reading2"])
