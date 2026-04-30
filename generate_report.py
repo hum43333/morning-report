@@ -52,53 +52,67 @@ def get_weather():
 
 # ── 성무일도 ───────────────────────────────────────────
 def get_liturgy():
-    """catholic.or.kr 성무일도 초대송 URL을 날짜 기반으로 직접 호출해서 본문 추출.
-    기본 페이지에는 본문이 없고, stype=inv 파라미터가 있는 URL에 본문이 있음.
+    """catholic.or.kr 성무일도 아침기도 본문 추출.
+    '날 구하소서'로 시작해서 '파견'으로 끝나는 구간을 텍스트에서 직접 잘라냄.
     """
     try:
         date_str = today.strftime("%Y-%m-%d")
-        # 아침기도만 가져오기
-        stypes = ["mo"]
-        stype_names = {
-            "mo": "아침기도"
-        }
-
         headers = {"User-Agent": "Mozilla/5.0"}
-        all_text = []
 
-        for stype in stypes:
-            url = (
-                f"https://maria.catholic.or.kr/mi_pr/sungmu/sungmu.asp"
-                f"?menu=sungmu&sunseo=1&gomonth={date_str}&stype={stype}"
-            )
-            r = requests.get(url, headers=headers, timeout=15)
-            r.encoding = "utf-8"
-            soup = BeautifulSoup(r.text, "html.parser")
+        # stype=mo(아침기도) URL 직접 호출
+        url = (
+            f"https://maria.catholic.or.kr/mi_pr/sungmu/sungmu.asp"
+            f"?menu=sungmu&sunseo=1&gomonth={date_str}&stype=mo"
+        )
+        r = requests.get(url, headers=headers, timeout=15)
+        r.encoding = "utf-8"
+        soup = BeautifulSoup(r.text, "html.parser")
+        full_text = soup.get_text(separator="\n")
+        lines = [l.strip() for l in full_text.splitlines()]
 
-            # 본문 테이블 찾기 — 내용이 있는 td 추출
+        # 아침기도 시작점: '날 구하소서' 가 포함된 줄
+        start_idx = None
+        for i, line in enumerate(lines):
+            if "날 구하소서" in line:
+                start_idx = i
+                break
+
+        if start_idx is None:
+            # 혹시 못 찾으면 전체 텍스트에서 테이블만 추출해서 반환
             tables = soup.find_all("table")
-            section_lines = []
+            fallback = []
             for table in tables:
-                text = table.get_text(separator="\n")
-                # 내용이 있는 테이블만 (메뉴/푸터 제외)
-                if any(kw in text for kw in ["주여", "시편", "찬미", "기도", "주님", "하느님"]):
-                    for line in text.splitlines():
+                t = table.get_text(separator="\n")
+                if "하느님" in t or "찬미" in t or "시편" in t:
+                    for line in t.splitlines():
                         line = line.strip()
-                        if line and not any(bad in line for bad in [
-                            "goodnews", "catholic.or.kr", "서울대교구",
-                            "이용약관", "개인정보", "ⓒ", "quick", "글자크기",
-                            "매일미사", "가톨릭기도서", "7성사", "성무일도"
-                        ]):
-                            section_lines.append(line)
+                        if line:
+                            fallback.append(line)
+            return "\n".join(fallback) if fallback else "아침기도 본문을 찾지 못했습니다."
 
-            if section_lines:
-                all_text.append(f"=== {stype_names.get(stype, stype)} ===")
-                all_text.extend(section_lines)
+        # 끝점: '파견' 이 포함된 줄 이후
+        end_idx = len(lines)
+        for i in range(start_idx + 1, len(lines)):
+            if "파견" in lines[i]:
+                end_idx = i + 1
+                break
+            # 다음 섹션 시작 또는 푸터 감지 시 중단
+            if any(kw in lines[i] for kw in [
+                "이용약관", "ⓒ GoodNews", "서울대교구", "goodnews@"
+            ]):
+                end_idx = i
+                break
 
-        if not all_text:
-            return "성무일도 본문을 찾지 못했습니다."
+        # 불필요한 줄 제거 후 반환
+        result = []
+        for line in lines[start_idx:end_idx]:
+            if line and not any(bad in line for bad in [
+                "goodnews", "catholic.or.kr", "이용약관",
+                "개인정보", "ⓒ", "글자크기", "quick"
+            ]):
+                result.append(line)
 
-        return "\n".join(all_text)
+        return "\n".join(result) if result else "아침기도 본문을 찾지 못했습니다."
     except Exception as e:
         return f"성무일도 오류: {e}"
 
