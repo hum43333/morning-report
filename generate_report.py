@@ -238,7 +238,7 @@ def get_calendar_events(date: datetime.date) -> list:
         )
         os.unlink(cred_path)
 
-        service = build("googleapiclient", "v3", credentials=creds)
+        service = build("calendar", "v3", credentials=creds)
 
         # 날짜 범위 (KST 기준)
         start = datetime.datetime.combine(date, datetime.time.min).replace(tzinfo=KST).isoformat()
