@@ -193,10 +193,6 @@ def get_gospel():
         result["reading1"] = f"복음 오류: {e}"
     return result
 
-    except Exception as e:
-        result["reading1"] = f"복음 오류: {e}"
-    return result
-
 
 # ── 구글 캘린더 ────────────────────────────────────────
 def get_calendar_events(date: datetime.date) -> list:
