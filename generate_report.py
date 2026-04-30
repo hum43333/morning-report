@@ -147,21 +147,41 @@ def get_gospel():
         sections = {"reading1": [], "reading2": [], "gospel": []}
         current = None
         for line in lines:
+            # 섹션 시작 감지
             if "제1독서" in line:
                 current = "reading1"
+                continue
             elif "제2독서" in line:
                 current = "reading2"
-            elif "복음" in line and "말씀" not in line and current != "gospel":
+                continue
+            elif "복음" in line and "말씀" not in line and "환호송" not in line and "입당" not in line:
                 current = "gospel"
-            elif current:
-                # 다음 섹션 시작 감지 시 중단
-                if any(kw in line for kw in ["강론", "화답송", "알렐루야", "저작권"]):
-                    if current == "reading1" and sections["reading1"]:
-                        current = None
-                    elif current == "gospel" and sections["gospel"]:
-                        current = None
+                continue
+
+            if current == "reading1":
+                # 제1독서 끝: 화답송/알렐루야/복음/입당 성가 등이 나오면 중단
+                if any(kw in line for kw in ["화답송", "알렐루야", "입당 성가", "입당성가", "제2독서", "복음"]):
+                    current = None
+                    # 복음이 나왔으면 바로 gospel로 전환
+                    if "복음" in line and "말씀" not in line and "환호송" not in line:
+                        current = "gospel"
                 else:
-                    sections[current].append(line)
+                    sections["reading1"].append(line)
+
+            elif current == "reading2":
+                if any(kw in line for kw in ["화답송", "알렐루야", "입당 성가", "입당성가", "복음"]):
+                    current = None
+                    if "복음" in line and "말씀" not in line and "환호송" not in line:
+                        current = "gospel"
+                else:
+                    sections["reading2"].append(line)
+
+            elif current == "gospel":
+                # 복음 끝: 강론/저작권/입당 성가 등이 나오면 중단
+                if any(kw in line for kw in ["강론", "저작권", "입당 성가", "입당성가", "ⓒ"]):
+                    current = None
+                else:
+                    sections["gospel"].append(line)
 
         result["reading1"] = "\n".join(sections["reading1"])
         result["reading2"] = "\n".join(sections["reading2"])
