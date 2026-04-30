@@ -90,14 +90,22 @@ def get_liturgy():
                             fallback.append(line)
             return "\n".join(fallback) if fallback else "아침기도 본문을 찾지 못했습니다."
 
-        # 끝점: '파견' 이 포함된 줄 이후
+        # 끝점: '파견'을 찾은 뒤 푸터가 나올 때 중단
+        # 파견을 못 찾아도 푸터에서 중단
+        found_pagen = False
         end_idx = len(lines)
         for i in range(start_idx + 1, len(lines)):
             if "파견" in lines[i]:
-                end_idx = i + 1
+                found_pagen = True
+            # 파견 이후 푸터/메뉴 도달 시 종료
+            if found_pagen and any(kw in lines[i] for kw in [
+                "이용약관", "ⓒ GoodNews", "서울대교구", "goodnews@",
+                "매일미사", "가톨릭기도서", "7성사"
+            ]):
+                end_idx = i
                 break
-            # 다음 섹션 시작 또는 푸터 감지 시 중단
-            if any(kw in lines[i] for kw in [
+            # 파견 미발견 상태에서 푸터 도달 시 종료
+            if not found_pagen and any(kw in lines[i] for kw in [
                 "이용약관", "ⓒ GoodNews", "서울대교구", "goodnews@"
             ]):
                 end_idx = i
