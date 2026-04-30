@@ -60,7 +60,7 @@ def get_liturgy():
         url = "https://maria.catholic.or.kr/mi_pr/sungmu/sungmu.asp"
         headers = {"User-Agent": "Mozilla/5.0"}
         r = requests.get(url, headers=headers, timeout=15)
-        r.encoding = "euc-kr"
+        r.encoding = "utf-8"
         soup = BeautifulSoup(r.text, "html.parser")
 
         # 모든 테이블 중 '주여, 내 입시울을 열어'가 포함된 것부터 수집
@@ -103,7 +103,7 @@ def get_gospel():
         url = "https://maria.catholic.or.kr/mi_pr/missa/missa.asp"
         headers = {"User-Agent": "Mozilla/5.0"}
         r = requests.get(url, headers=headers, timeout=15)
-        r.encoding = "euc-kr"
+        r.encoding = "utf-8"
         soup = BeautifulSoup(r.text, "html.parser")
 
         # 사이드메뉴 제거
