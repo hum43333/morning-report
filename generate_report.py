@@ -29,7 +29,7 @@ def get_weather():
     try:
         url = (
             "https://api.openweathermap.org/data/2.5/weather"
-            f"?q=Nagano,JP&appid={WEATHER_API_KEY}&units=metric&lang=kr"
+            f"?q=Gotemba,JP&appid={WEATHER_API_KEY}&units=metric&lang=kr"
         )
         r = requests.get(url, timeout=10)
         d = r.json()
@@ -246,13 +246,7 @@ def get_calendar_events(date: datetime.date) -> list:
         end   = datetime.datetime.combine(date, datetime.time.max).replace(tzinfo=KST).isoformat()
 
         # CALENDAR_ID 파싱
-        calendar_ids = [
-    "hum43333@gmail.com",
-    "v1d07sg1gjfe82d6316scjmenip511ds@import.calendar.google.com",
-    "j5l00pjc0fn27ed6sdc1qdp58gr8vkbr@import.calendar.google.com",
-    "7sdm8lrb0fh40ldf9end67fh43jtdnc3@import.calendar.google.com",
-    "kvsunbo4bcdr1p1kv51iu4hmn2eiotnc@import.calendar.google.com",
-]
+        calendar_ids = [c.strip() for c in CALENDAR_ID.replace(';', ',').split(',') if '@' in c.strip()]
         print(f"캘린더 ID 목록 ({len(calendar_ids)}개): {calendar_ids}")
 
         all_events = []
