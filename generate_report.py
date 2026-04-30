@@ -144,40 +144,37 @@ def get_gospel():
         lines = [l.strip() for l in text.splitlines() if l.strip()]
 
         # 제1독서, 제2독서, 복음 구간 파싱
+        # 복음 시작은 반드시 "○○복음" 형태 (마태오, 마르코, 루카, 요한 복음)
+        import re
+        gospel_pattern = re.compile(r"(마태오|마르코|루카|요한).{0,5}복음")
+
         sections = {"reading1": [], "reading2": [], "gospel": []}
         current = None
         for line in lines:
             # 섹션 시작 감지
-            if "제1독서" in line:
+            if "제1독서" in line and current is None:
                 current = "reading1"
                 continue
-            elif "제2독서" in line:
+            elif "제2독서" in line and current == "reading1":
                 current = "reading2"
                 continue
-            elif "복음" in line and "말씀" not in line and "환호송" not in line and "입당" not in line:
+            elif gospel_pattern.search(line):
                 current = "gospel"
                 continue
 
             if current == "reading1":
-                # 제1독서 끝: 화답송/알렐루야/복음/입당 성가 등이 나오면 중단
-                if any(kw in line for kw in ["화답송", "알렐루야", "입당 성가", "입당성가", "제2독서", "복음"]):
+                if any(kw in line for kw in ["화답송", "알렐루야", "입당 성가", "입당성가", "제2독서"]):
                     current = None
-                    # 복음이 나왔으면 바로 gospel로 전환
-                    if "복음" in line and "말씀" not in line and "환호송" not in line:
-                        current = "gospel"
                 else:
                     sections["reading1"].append(line)
 
             elif current == "reading2":
-                if any(kw in line for kw in ["화답송", "알렐루야", "입당 성가", "입당성가", "복음"]):
+                if any(kw in line for kw in ["화답송", "알렐루야", "입당 성가", "입당성가"]):
                     current = None
-                    if "복음" in line and "말씀" not in line and "환호송" not in line:
-                        current = "gospel"
                 else:
                     sections["reading2"].append(line)
 
             elif current == "gospel":
-                # 복음 끝: 강론/저작권/입당 성가 등이 나오면 중단
                 if any(kw in line for kw in ["강론", "저작권", "입당 성가", "입당성가", "ⓒ"]):
                     current = None
                 else:
