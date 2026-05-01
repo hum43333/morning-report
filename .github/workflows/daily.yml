@@ -2,8 +2,8 @@ name: 모닝 리포트 자동 생성
 
 on:
   schedule:
-    # 매일 새벽 1시 (KST) = UTC 16:00 (전날)
-    - cron: '0 16 * * *'
+    # 매일 새벽 4시 (KST) = UTC 16:00 (전날)
+   - cron: '30 18 * * *'
   workflow_dispatch:   # 수동 실행 버튼 (테스트용)
 
 jobs:
