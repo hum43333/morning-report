@@ -23,32 +23,52 @@ CALENDAR_ID = os.environ.get("CALENDAR_ID", "primary")
 
 # ── 날씨 ──────────────────────────────────────────────
 def get_weather():
-    """OpenWeatherMap API로 날씨 가져오기 (나가노 기준)"""
+    """OpenWeatherMap API로 오늘 아침/낮/저녁 날씨 가져오기 (나가노 기준)"""
     if not WEATHER_API_KEY:
-        return "날씨 API 키 없음"
+        return {"morning": "날씨 API 키 없음", "afternoon": "", "evening": ""}
     try:
         url = (
-            "https://api.openweathermap.org/data/2.5/weather"
+            "https://api.openweathermap.org/data/2.5/forecast"
             f"?q=Gotemba,JP&appid={WEATHER_API_KEY}&units=metric&lang=kr"
         )
         r = requests.get(url, timeout=10)
-        d = r.json()
-        desc = d["weather"][0]["description"]
-        temp = round(d["main"]["temp"])
+        data = r.json()
 
-        # 맑음/흐림/비 분류
-        main = d["weather"][0]["main"].lower()
-        if "rain" in main or "drizzle" in main or "thunderstorm" in main:
-            label = "비"
-        elif "cloud" in main:
-            label = "흐림"
-        else:
-            label = "맑음"
+        # 아침(06~09시), 낮(12~15시), 저녁(18~21시) 목표 시간
+        targets = {"morning": 6, "afternoon": 12, "evening": 18}
+        result = {}
 
-        return f"{label} ({desc}, {temp}°C)"
+        for key, target_hour in targets.items():
+            best = None
+            best_diff = 999
+            for item in data.get("list", []):
+                dt = datetime.datetime.fromtimestamp(item["dt"], tz=KST)
+                if dt.date() != today:
+                    continue
+                diff = abs(dt.hour - target_hour)
+                if diff < best_diff:
+                    best_diff = diff
+                    best = item
+
+            if best:
+                desc = best["weather"][0]["description"]
+                temp = round(best["main"]["temp"])
+                main = best["weather"][0]["main"].lower()
+                if "rain" in main or "drizzle" in main or "thunderstorm" in main:
+                    label = "비"
+                elif "cloud" in main:
+                    label = "흐림"
+                elif "snow" in main:
+                    label = "눈"
+                else:
+                    label = "맑음"
+                result[key] = f"{label} ({desc}, {temp}°C)"
+            else:
+                result[key] = "정보 없음"
+
+        return result
     except Exception as e:
-        return f"날씨 정보 오류: {e}"
-
+        return {"morning": f"날씨 오류: {e}", "afternoon": "", "evening": ""}
 
 # ── 성무일도 ───────────────────────────────────────────
 def get_liturgy():
