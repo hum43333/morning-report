@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>모닝 리포트</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      background: #fff;
+      color: #1a1a1a;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 14px;
+      line-height: 1.8;
+      padding: 60px 30px;
+    }
+
+    #main-page {
+      max-width: 320px;
+      margin: 0 auto;
+    }
+
+    .report-date {
+      font-size: 12px;
+      color: #999;
+      margin-bottom: 4px;
+    }
+
+    .report-title {
+      font-size: 18px;
+      font-weight: bold;
+      margin-bottom: 40px;
+    }
+
+    nav a {
+      display: block;
+      padding: 14px 0;
+      border-bottom: 1px solid #e0e0e0;
+      text-decoration: none;
+      color: #1a1a1a;
+      font-size: 14px;
+    }
+
+    nav a:first-child {
+      border-top: 1px solid #e0e0e0;
+    }
+
+    nav a:hover {
+      color: #555;
+    }
+
+    .footer {
+      margin-top: 40px;
+      font-size: 11px;
+      color: #bbb;
+    }
+
+    /* 상세 페이지 */
+    #detail-page {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: #fff;
+      overflow-y: auto;
+      z-index: 100;
+      padding: 0 0 60px;
+    }
+
+    .detail-header {
+      position: sticky;
+      top: 0;
+      background: #fff;
+      border-bottom: 1px solid #e0e0e0;
+      padding: 16px 30px;
+      display: flex;
+      align-items: baseline;
+      gap: 20px;
+    }
+
+    .back-btn {
+      background: none;
+      border: none;
+      cursor: pointer;
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 13px;
+      color: #999;
+      padding: 0;
+    }
+
+    .back-btn:hover { color: #1a1a1a; }
+
+    .detail-title {
+      font-size: 14px;
+      font-weight: bold;
+    }
+
+    .detail-body {
+      padding: 30px;
+      max-width: 600px;
+      font-size: 14px;
+      line-height: 1.9;
+      white-space: pre-wrap;
+      word-break: keep-all;
+      color: #1a1a1a;
+    }
+
+    .section-block {
+      margin-bottom: 32px;
+    }
+
+    .section-label {
+      font-size: 12px;
+      color: #999;
+      margin-bottom: 8px;
+      letter-spacing: 0.05em;
+    }
+
+    .news-item {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 6px;
+    }
+
+    .news-num {
+      flex-shrink: 0;
+      color: #999;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="main-page">
+    <div class="report-date" id="header-date"></div>
+    <div class="report-title">모닝 리포트</div>
+
+    <nav>
+      <a href="#" onclick="openDetail('weather'); return false;">오늘의 날씨</a>
+      <a href="#" onclick="openDetail('liturgy'); return false;">오늘의 성무일도</a>
+      <a href="#" onclick="openDetail('gospel'); return false;">오늘의 복음</a>
+      <a href="#" onclick="openDetail('gospel_tomorrow'); return false;">내일의 복음</a>
+      <a href="#" onclick="openDetail('calendar'); return false;">일정</a>
+      <a href="#" onclick="openDetail('news'); return false;">주요 신문 기사</a>
+    </nav>
+
+    <div class="footer" id="footer-generated"></div>
+  </div>
+
+  <div id="detail-page">
+    <div class="detail-header">
+      <button class="back-btn" onclick="closeDetail()">← 뒤로</button>
+      <div class="detail-title" id="detail-title"></div>
+    </div>
+    <div class="detail-body" id="detail-body"></div>
+  </div>
+
+  <script>
+    let reportData = null;
+
+    const TITLES = {
+      weather:         '오늘의 날씨',
+      liturgy:         '오늘의 성무일도',
+      gospel:          '오늘의 복음',
+      gospel_tomorrow: '내일의 복음',
+      calendar:        '일정',
+      news:            '주요 신문 기사',
+    };
+
+    const PAPER_NAMES = {
+      hankyoreh: '한겨레',
+      chosun:    '조선일보',
+      joongang:  '중앙일보',
+      donga:     '동아일보',
+    };
+
+    async function loadReport() {
+      try {
+        const res = await fetch('report.json?t=' + Date.now());
+        if (!res.ok) throw new Error();
+        reportData = await res.json();
+        document.getElementById('header-date').textContent = reportData.date || '';
+        document.getElementById('footer-generated').textContent =
+          reportData.generated_at ? '생성: ' + reportData.generated_at : '';
+      } catch (e) {
+        document.getElementById('header-date').textContent = '리포트 로드 실패';
+      }
+    }
+
+    function openDetail(section) {
+      document.getElementById('detail-title').textContent = TITLES[section];
+      document.getElementById('detail-body').innerHTML =
+        reportData ? renderSection(section) : '데이터 없음';
+      document.getElementById('main-page').style.display = 'none';
+      const dp = document.getElementById('detail-page');
+      dp.style.display = 'block';
+      dp.scrollTop = 0;
+    }
+
+    function closeDetail() {
+      document.getElementById('detail-page').style.display = 'none';
+      document.getElementById('main-page').style.display = '';
+    }
+
+    function esc(str) {
+      return (str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    function renderGospel(g) {
+      if (!g) return '정보 없음';
+      let html = '';
+      if (g.reading1) html += `<div class="section-block"><div class="section-label">제1독서</div><div>${esc(g.reading1)}</div></div>`;
+      if (g.reading2) html += `<div class="section-block"><div class="section-label">제2독서</div><div>${esc(g.reading2)}</div></div>`;
+      if (g.gospel)   html += `<div class="section-block"><div class="section-label">복음</div><div>${esc(g.gospel)}</div></div>`;
+      return html || '정보 없음';
+    }
+
+    function renderSection(section) {
+      const d = reportData;
+
+      if (section === 'weather') {
+        const w = d.weather;
+        if (typeof w === 'string') {
+          return `<div>${esc(w)}</div>`;
+        }
+        const slots = [
+          { key: 'morning',   label: '아침' },
+          { key: 'afternoon', label: '낮'   },
+          { key: 'evening',   label: '저녁' },
+        ];
+        return slots.map(({ key, label }) =>
+          `<div class="section-block"><div class="section-label">${label}</div><div>${esc((w && w[key]) || '정보 없음')}</div></div>`
+        ).join('');
+      }
+
+      if (section === 'liturgy') {
+        const text = d.liturgy || '정보 없음';
+        const lines = text.split('\n');
+        const HEADER_RE = /^(후렴|찬미가|시편|찬가|성경소구|응송|즈카르야|청원기도|주님의 기도|마침기도|파견|◎|○|＋)/;
+        const blocks = [];
+        let current = [];
+        let currentIsHeader = false;
+        for (const line of lines) {
+          if (line.trim() === '') {
+            if (current.length) { blocks.push({ isHeader: currentIsHeader, lines: current }); current = []; currentIsHeader = false; }
+          } else {
+            const isHeader = HEADER_RE.test(line.trim());
+            if (isHeader && current.length) { blocks.push({ isHeader: currentIsHeader, lines: current }); current = []; currentIsHeader = false; }
+            if (isHeader) currentIsHeader = true;
+            current.push(line);
+          }
+        }
+        if (current.length) blocks.push({ isHeader: currentIsHeader, lines: current });
+        return blocks.map(b => {
+          const marginTop = b.isHeader ? '2em' : '0';
+          return `<p style="margin-top:${marginTop};margin-bottom:1em;white-space:pre-wrap;">${esc(b.lines.join('\n'))}</p>`;
+        }).join('');
+      }
+
+      if (section === 'gospel') {
+        return renderGospel(d.gospel);
+      }
+
+      if (section === 'gospel_tomorrow') {
+        return renderGospel(d.gospel_tomorrow);
+      }
+
+      if (section === 'calendar') {
+        return [
+          { key: 'yesterday', label: '어제' },
+          { key: 'today',     label: '오늘' },
+          { key: 'tomorrow',  label: '내일' },
+        ].map(({ key, label }) => {
+          const events = (d.calendar || {})[key] || [];
+          // "일정 없음" 문자열만 있는 경우는 빈 것으로 처리
+          const realEvents = events.filter(e => e && e.trim() !== '일정 없음');
+          const items = realEvents.length
+            ? realEvents.map(e => `<div class="news-item"><span class="news-num">·</span><span>${esc(e)}</span></div>`).join('')
+            : '<div style="color:#bbb">일정 없음</div>';
+          return `<div class="section-block"><div class="section-label">${label}</div>${items}</div>`;
+        }).join('');
+      }
+
+      if (section === 'news') {
+        return ['hankyoreh', 'chosun', 'joongang', 'donga'].map(key => {
+          const articles = (d.news || {})[key] || [];
+          const items = articles.length
+            ? articles.map((t, i) =>
+                `<div class="news-item"><span class="news-num">${i + 1}.</span><span>${esc(t)}</span></div>`
+              ).join('')
+            : '<div style="color:#bbb">정보 없음</div>';
+          return `<div class="section-block"><div class="section-label">${PAPER_NAMES[key]}</div>${items}</div>`;
+        }).join('');
+      }
+
+      return '정보 없음';
+    }
+
+    window.addEventListener('popstate', () => {
+      if (document.getElementById('detail-page').style.display === 'block') closeDetail();
+    });
+
+    loadReport();
+  </script>
+</body>
+</html>
