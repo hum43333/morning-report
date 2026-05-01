@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=640, initial-scale=1.0">
+  <title>모닝 리포트 (안경)</title>
+  <style>
+    /* ─────────────────────────────────────────────
+       Even G2 안경 (Web Scope) 최적화 스타일
+       - 단색(녹색) 디스플레이: 검정 배경 + 흰 글씨만 사용
+       - 해상도 640x350: 너비 640 기준, 큰 글씨
+       - 그림자/그라데이션/아이콘 없음
+       ───────────────────────────────────────────── */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    html, body {
+      background: #000000;
+      color: #FFFFFF;
+      font-family: sans-serif;
+      font-size: 28px;
+      line-height: 1.5;
+      -webkit-text-size-adjust: 100%;
+    }
+
+    body {
+      padding: 24px 20px 60px;
+      width: 100%;
+      max-width: 640px;
+      margin: 0 auto;
+    }
+
+    /* ── 메인 페이지 ── */
+    .header {
+      border-bottom: 2px solid #FFFFFF;
+      padding-bottom: 16px;
+      margin-bottom: 24px;
+    }
+
+    .title {
+      font-size: 36px;
+      font-weight: bold;
+      margin-bottom: 8px;
+    }
+
+    .date {
+      font-size: 24px;
+    }
+
+    nav {
+      list-style: none;
+    }
+
+    .menu-item {
+      display: block;
+      width: 100%;
+      padding: 22px 16px;
+      margin-bottom: 12px;
+      background: #000000;
+      color: #FFFFFF;
+      border: 2px solid #FFFFFF;
+      font-size: 30px;
+      font-weight: bold;
+      text-align: left;
+      text-decoration: none;
+      cursor: pointer;
+      font-family: sans-serif;
+    }
+
+    .refresh-btn {
+      display: block;
+      width: 100%;
+      padding: 22px 16px;
+      margin-top: 24px;
+      background: #000000;
+      color: #FFFFFF;
+      border: 2px dashed #FFFFFF;
+      font-size: 28px;
+      font-weight: bold;
+      text-align: center;
+      cursor: pointer;
+      font-family: sans-serif;
+    }
+
+    .refresh-btn:disabled {
+      border-style: dotted;
+    }
+
+    .status {
+      margin-top: 16px;
+      font-size: 22px;
+      min-height: 28px;
+    }
+
+    .footer {
+      margin-top: 24px;
+      font-size: 20px;
+      border-top: 1px solid #FFFFFF;
+      padding-top: 12px;
+    }
+
+    /* ── 상세 페이지 ── */
+    #detail-page {
+      display: none;
+    }
+
+    .detail-header {
+      border-bottom: 2px solid #FFFFFF;
+      padding-bottom: 16px;
+      margin-bottom: 24px;
+    }
+
+    .back-btn {
+      display: block;
+      width: 100%;
+      padding: 18px 16px;
+      margin-bottom: 16px;
+      background: #000000;
+      color: #FFFFFF;
+      border: 2px solid #FFFFFF;
+      font-size: 28px;
+      font-weight: bold;
+      text-align: center;
+      cursor: pointer;
+      font-family: sans-serif;
+    }
+
+    .detail-title {
+      font-size: 32px;
+      font-weight: bold;
+    }
+
+    .detail-body {
+      font-size: 28px;
+      line-height: 1.6;
+      word-break: keep-all;
+      overflow-wrap: break-word;
+    }
+
+    .section-block {
+      margin-bottom: 28px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid #FFFFFF;
+    }
+
+    .section-block:last-child {
+      border-bottom: none;
+    }
+
+    .section-label {
+      font-size: 24px;
+      font-weight: bold;
+      margin-bottom: 12px;
+      text-decoration: underline;
+    }
+
+    .item {
+      margin-bottom: 10px;
+    }
+
+    .item-num {
+      font-weight: bold;
+      margin-right: 6px;
+    }
+
+    .pre {
+      white-space: pre-wrap;
+    }
+
+    /* 페이지 전환 시 스크롤 위로 */
+    .top-anchor {
+      position: absolute;
+      top: 0;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── 메인 페이지 ── -->
+  <div id="main-page">
+    <div class="header">
+      <div class="title">모닝 리포트</div>
+      <div class="date" id="header-date">로딩 중...</div>
+    </div>
+
+    <nav>
+      <a class="menu-item" href="#" onclick="openDetail('weather'); return false;">1. 오늘의 날씨</a>
+      <a class="menu-item" href="#" onclick="openDetail('liturgy'); return false;">2. 오늘의 성무일도</a>
+      <a class="menu-item" href="#" onclick="openDetail('gospel'); return false;">3. 오늘의 복음</a>
+      <a class="menu-item" href="#" onclick="openDetail('gospel_tomorrow'); return false;">4. 내일의 복음</a>
+      <a class="menu-item" href="#" onclick="openDetail('calendar'); return false;">5. 일정</a>
+      <a class="menu-item" href="#" onclick="openDetail('news'); return false;">6. 주요 신문</a>
+    </nav>
+
+    <button class="refresh-btn" id="refresh-btn" onclick="manualRefresh()">[ 수동 갱신 ]</button>
+    <div class="status" id="refresh-status"></div>
+
+    <div class="footer" id="footer-generated"></div>
+  </div>
+
+  <!-- ── 상세 페이지 ── -->
+  <div id="detail-page">
+    <button class="back-btn" onclick="closeDetail()">← 메뉴로 돌아가기</button>
+    <div class="detail-header">
+      <div class="detail-title" id="detail-title"></div>
+    </div>
+    <div class="detail-body" id="detail-body"></div>
+    <button class="back-btn" style="margin-top:24px;" onclick="closeDetail()">← 메뉴로 돌아가기</button>
+  </div>
+
+  <script>
+    let reportData = null;
+
+    // ── GitHub 설정 (수동 갱신용) ──
+    const GITHUB_OWNER    = 'hum43333';
+    const GITHUB_REPO     = 'morning-report';
+    const GITHUB_WORKFLOW = 'daily.yml';
+    const GITHUB_BRANCH   = 'main';
+
+    const TITLES = {
+      weather:         '오늘의 날씨',
+      liturgy:         '오늘의 성무일도',
+      gospel:          '오늘의 복음',
+      gospel_tomorrow: '내일의 복음',
+      calendar:        '일정',
+      news:            '주요 신문 기사',
+    };
+
+    const PAPER_NAMES = {
+      hankyoreh: '한겨레',
+      chosun:    '조선일보',
+      jtbc:      'JTBC',
+      joongang:  'JTBC',
+      donga:     '동아일보',
+    };
+
+    async function loadReport() {
+      try {
+        const res = await fetch('report.json?t=' + Date.now());
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        reportData = await res.json();
+        document.getElementById('header-date').textContent = reportData.date || '';
+        document.getElementById('footer-generated').textContent =
+          reportData.generated_at ? '생성: ' + reportData.generated_at : '';
+      } catch (e) {
+        document.getElementById('header-date').textContent = '리포트 로드 실패';
+        document.getElementById('footer-generated').textContent = '오류: ' + e.message;
+      }
+    }
+
+    function openDetail(section) {
+      document.getElementById('detail-title').textContent = TITLES[section] || section;
+      document.getElementById('detail-body').innerHTML =
+        reportData ? renderSection(section) : '데이터 없음';
+      document.getElementById('main-page').style.display = 'none';
+      document.getElementById('detail-page').style.display = 'block';
+      window.scrollTo(0, 0);
+    }
+
+    function closeDetail() {
+      document.getElementById('detail-page').style.display = 'none';
+      document.getElementById('main-page').style.display = '';
+      window.scrollTo(0, 0);
+    }
+
+    function esc(str) {
+      return (str || '').toString()
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+    }
+
+    function renderGospel(g) {
+      if (!g) return '<div>정보 없음</div>';
+      let html = '';
+      if (g.reading1) {
+        html += '<div class="section-block"><div class="section-label">제1독서</div>'
+              + '<div class="pre">' + esc(g.reading1) + '</div></div>';
+      }
+      if (g.reading2) {
+        html += '<div class="section-block"><div class="section-label">제2독서</div>'
+              + '<div class="pre">' + esc(g.reading2) + '</div></div>';
+      }
+      if (g.gospel) {
+        html += '<div class="section-block"><div class="section-label">복음</div>'
+              + '<div class="pre">' + esc(g.gospel) + '</div></div>';
+      }
+      return html || '<div>정보 없음</div>';
+    }
+
+    function renderSection(section) {
+      const d = reportData;
+
+      if (section === 'weather') {
+        const w = d.weather;
+        if (typeof w === 'string') {
+          return '<div>' + esc(w) + '</div>';
+        }
+        const slots = [
+          { key: 'morning',   label: '아침' },
+          { key: 'afternoon', label: '낮'   },
+          { key: 'evening',   label: '저녁' },
+        ];
+        return slots.map(s =>
+          '<div class="section-block"><div class="section-label">' + s.label + '</div>'
+          + '<div>' + esc((w && w[s.key]) || '정보 없음') + '</div></div>'
+        ).join('');
+      }
+
+      if (section === 'liturgy') {
+        const text = d.liturgy || '정보 없음';
+        return '<div class="pre">' + esc(text) + '</div>';
+      }
+
+      if (section === 'gospel') {
+        return renderGospel(d.gospel);
+      }
+
+      if (section === 'gospel_tomorrow') {
+        return renderGospel(d.gospel_tomorrow);
+      }
+
+      if (section === 'calendar') {
+        const cal = d.calendar || {};
+        const days = [
+          { key: 'yesterday', label: '어제' },
+          { key: 'today',     label: '오늘' },
+          { key: 'tomorrow',  label: '내일' },
+        ];
+        return days.map(day => {
+          const raw = cal[day.key] || [];
+          const events = raw.filter(e => e && e.trim() !== '일정 없음');
+          const items = events.length
+            ? events.map(e =>
+                '<div class="item">- ' + esc(e) + '</div>'
+              ).join('')
+            : '<div>일정 없음</div>';
+          return '<div class="section-block"><div class="section-label">' + day.label + '</div>'
+               + items + '</div>';
+        }).join('');
+      }
+
+      if (section === 'news') {
+        const news = d.news || {};
+        const keys = ['hankyoreh', 'chosun', 'jtbc', 'joongang', 'donga'];
+        const seen = new Set();
+        const validKeys = keys.filter(k => {
+          if (news[k] !== undefined && !seen.has(PAPER_NAMES[k])) {
+            seen.add(PAPER_NAMES[k]);
+            return true;
+          }
+          return false;
+        });
+        return validKeys.map(key => {
+          const articles = news[key] || [];
+          const items = articles.length
+            ? articles.map((t, i) =>
+                '<div class="item"><span class="item-num">' + (i + 1) + '.</span>' + esc(t) + '</div>'
+              ).join('')
+            : '<div>정보 없음</div>';
+          return '<div class="section-block"><div class="section-label">' + PAPER_NAMES[key] + '</div>'
+               + items + '</div>';
+        }).join('');
+      }
+
+      return '<div>정보 없음</div>';
+    }
+
+    // ── 수동 갱신 ──
+    async function manualRefresh() {
+      const btn    = document.getElementById('refresh-btn');
+      const status = document.getElementById('refresh-status');
+
+      let token = null;
+      try {
+        token = localStorage.getItem('github_token');
+      } catch (e) {
+        // localStorage 사용 불가
+      }
+
+      if (!token) {
+        try {
+          token = prompt('GitHub 토큰을 입력하세요');
+        } catch (e) {
+          status.textContent = '토큰 입력 불가. 휴대폰에서 갱신하세요.';
+          return;
+        }
+        if (!token) {
+          status.textContent = '취소되었습니다.';
+          return;
+        }
+        token = token.trim();
+        try {
+          localStorage.setItem('github_token', token);
+        } catch (e) {
+          // 저장 실패해도 진행
+        }
+      }
+
+      btn.disabled = true;
+      btn.textContent = '[ 갱신 요청 중... ]';
+      status.textContent = '';
+
+      try {
+        const res = await fetch(
+          'https://api.github.com/repos/' + GITHUB_OWNER + '/' + GITHUB_REPO
+            + '/actions/workflows/' + GITHUB_WORKFLOW + '/dispatches',
+          {
+            method: 'POST',
+            headers: {
+              'Accept': 'application/vnd.github+json',
+              'Authorization': 'Bearer ' + token,
+              'X-GitHub-Api-Version': '2022-11-28',
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ ref: GITHUB_BRANCH }),
+          }
+        );
+
+        if (res.status === 204) {
+          status.textContent = '갱신 요청됨. 90초 후 자동 새로고침.';
+          btn.textContent = '[ 갱신 요청됨 ]';
+          setTimeout(function () { location.reload(); }, 90000);
+        } else if (res.status === 401) {
+          try { localStorage.removeItem('github_token'); } catch (e) {}
+          status.textContent = '토큰 오류. 버튼을 다시 누르세요.';
+          btn.textContent = '[ 수동 갱신 ]';
+          btn.disabled = false;
+        } else {
+          status.textContent = '오류: ' + res.status;
+          btn.textContent = '[ 수동 갱신 ]';
+          btn.disabled = false;
+        }
+      } catch (e) {
+        status.textContent = '네트워크 오류';
+        btn.textContent = '[ 수동 갱신 ]';
+        btn.disabled = false;
+      }
+    }
+
+    loadReport();
+  </script>
+</body>
+</html>
