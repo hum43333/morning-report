@@ -28,7 +28,7 @@ jobs:
 
       - name: 의존성 설치
         run: |
-          pip install requests beautifulsoup4 lxml
+          pip install requests beautifulsoup4 lxml icalendar recurring-ical-events
 
       - name: 리포트 생성
         env:
