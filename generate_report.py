@@ -19,7 +19,7 @@ tomorrow  = today + datetime.timedelta(days=1)
 
 WEATHER_API_KEY = os.environ.get("WEATHER_API_KEY", "")   # OpenWeatherMap API 키
 GOOGLE_CALENDAR_CREDS = os.environ.get("GOOGLE_CALENDAR_CREDS", "")  # JSON 문자열
-CALENDAR_ID = os.environ.get("CALENDAR_ID", "primary")
+
 
 # ── 날씨 ──────────────────────────────────────────────
 def get_weather():
@@ -260,7 +260,8 @@ def get_calendar_events(date: datetime.date) -> list:
         end   = datetime.datetime.combine(date, datetime.time.max).replace(tzinfo=KST).isoformat()
 
         # CALENDAR_ID 파싱
-        calendar_ids = [c.strip() for c in CALENDAR_ID.replace(';', ',').split(',') if '@' in c.strip()]
+        # 수정 후
+        calendar_ids = ["primary"]
         print(f"캘린더 ID 목록 ({len(calendar_ids)}개): {calendar_ids}")
 
         all_events = []
