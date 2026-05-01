@@ -19,7 +19,12 @@ tomorrow  = today + datetime.timedelta(days=1)
 
 WEATHER_API_KEY = os.environ.get("WEATHER_API_KEY", "")
 
-ICAL_URL = "https://p33-caldav.icloud.com/published/2/MTAwMzk4NDcwNTEwMDM5OIKMqbxDECSm4-w6pcPcOCIVP58eGmQm8cjZa9KDDBF9vv8SoApAB7gMPuYjpGnH98fB8YWpMvUQeizQXhsRZYU"
+ICAL_URLS = [
+    "https://p33-caldav.icloud.com/published/2/MTAwMzk4NDcwNTEwMDM5OIKMqbxDECSm4-w6pcPcOCIVP58eGmQm8cjZa9KDDBF9vv8SoApAB7gMPuYjpGnH98fB8YWpMvUQeizQXhsRZYU",
+    "https://p33-caldav.icloud.com/published/2/MTAwMzk4NDcwNTEwMDM5OIKMqbxDECSm4-w6pcPcOCJrKUsO_AW5w6v0v7oNHYHd5WsV_bMsDk3ACrtnjpxRLabjLsx6CvWdC053Tr3Ss-g",
+    "https://p33-caldav.icloud.com/published/2/MTAwMzk4NDcwNTEwMDM5OIKMqbxDECSm4-w6pcPcOCL-WdRUZNC9M2efypMusaAxOrdpLbYaR1k0kC7y_jLkePUEckPoFCXcbO9OSoe0tAQ",
+    "https://p33-caldav.icloud.com/published/2/MTAwMzk4NDcwNTEwMDM5OIKMqbxDECSm4-w6pcPcOCIoHyRjBOE4G3iJ_M_buNvEZ002XGdl5_L-zSwB2nVANnvgPEFdRe6Br16WHVu4Ipc",
+]
 
 # ── 날씨 ──────────────────────────────────────────────
 def get_weather():
@@ -231,9 +236,15 @@ def get_calendar_events(date: datetime.date) -> list:
     """iCloud 공개 캘린더 URL(.ics)에서 해당 날짜 일정 가져오기."""
     try:
         headers = {"User-Agent": "Mozilla/5.0"}
-        r = requests.get(ICAL_URL, headers=headers, timeout=15)
-        r.encoding = "utf-8"
-        lines = r.text.splitlines()
+all_lines = []
+        for url in ICAL_URLS:
+            try:
+                r = requests.get(url, headers=headers, timeout=15)
+                r.encoding = "utf-8"
+                all_lines.extend(r.text.splitlines())
+            except Exception as e:
+                print(f"캘린더 URL 오류: {e}")
+        lines = all_lines
 
         # 멀티라인 언폴딩 (RFC 5545: 줄 앞에 공백/탭이면 이전 줄과 합치기)
         unfolded = []
