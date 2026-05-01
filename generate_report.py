@@ -231,76 +231,62 @@ def get_gospel(target_date=None):
     except Exception as e:
         result["reading1"] = f"복음 오류: {e}"
     return result
-# ── 구글 캘린더 ────────────────────────────────────────
+# ── iCloud 캘린더 ────────────────────────────────────────
 def get_calendar_events(date: datetime.date) -> list:
-    """Google Calendar API — 서비스 계정(GOOGLE_CALENDAR_CREDS)으로 인증."""
-    GOOGLE_CALENDAR_CREDS = os.environ.get("GOOGLE_CALENDAR_CREDS", "")
-    if not GOOGLE_CALENDAR_CREDS:
-        return ["(캘린더 설정 필요: GOOGLE_CALENDAR_CREDS)"]
+    """iCloud 공개 캘린더 URL(.ics)에서 해당 날짜 일정 가져오기."""
+    ICAL_URL = "https://p33-caldav.icloud.com/published/2/MTAwMzk4NDcwNTEwMDM5OIKMqbxDECSm4-w6pcPcOCIVP58eGmQm8cjZa9KDDBF9vv8SoApAB7gMPuYjpGnH98fB8YWpMvUQeizQXhsRZYU"
     try:
-        from google.oauth2 import service_account
-        from googleapiclient.discovery import build
+        headers = {"User-Agent": "Mozilla/5.0"}
+        r = requests.get(ICAL_URL, headers=headers, timeout=15)
+        r.encoding = "utf-8"
+        lines = r.text.splitlines()
 
-        creds_data = json.loads(GOOGLE_CALENDAR_CREDS)
+        # 이벤트 파싱
+        events = []
+        in_event = False
+        current = {}
+        for line in lines:
+            if line.strip() == "BEGIN:VEVENT":
+                in_event = True
+                current = {}
+            elif line.strip() == "END:VEVENT":
+                in_event = False
+                if current:
+                    events.append(current)
+            elif in_event:
+                if line.startswith("SUMMARY"):
+                    current["summary"] = line.split(":", 1)[-1].strip()
+                elif line.startswith("DTSTART"):
+                    current["dtstart"] = line.split(":", 1)[-1].strip()
+                elif line.startswith("DTEND"):
+                    current["dtend"] = line.split(":", 1)[-1].strip()
 
-        # 서비스 계정 방식과 OAuth 방식 둘 다 대응
-        if creds_data.get("type") == "service_account":
-            creds = service_account.Credentials.from_service_account_info(
-                creds_data,
-                scopes=["https://www.googleapis.com/auth/calendar.readonly"],
-            )
-        else:
-            # OAuth 클라이언트 방식 (authorized_user 타입)
-            from google.oauth2.credentials import Credentials
-            creds = Credentials(
-                token=creds_data.get("token"),
-                refresh_token=creds_data.get("refresh_token"),
-                token_uri=creds_data.get("token_uri", "https://oauth2.googleapis.com/token"),
-                client_id=creds_data.get("client_id"),
-                client_secret=creds_data.get("client_secret"),
-                scopes=creds_data.get("scopes"),
-            )
-
-        service = build("calendar", "v3", credentials=creds)
-
-        # 날짜 범위 (KST 기준)
-        start = datetime.datetime.combine(date, datetime.time.min).replace(tzinfo=KST).isoformat()
-        end   = datetime.datetime.combine(date, datetime.time.max).replace(tzinfo=KST).isoformat()
-
-        # 접근 가능한 캘린더 목록 자동 조회
-        cal_list = service.calendarList().list().execute()
-        calendar_ids = [c["id"] for c in cal_list.get("items", [])]
-        if not calendar_ids:
-            calendar_ids = ["primary"]
-        print(f"캘린더 ID 목록 ({len(calendar_ids)}개): {calendar_ids}")
-
-        all_events = []
-        for cal_id in calendar_ids:
-            try:
-                events_result = service.events().list(
-                    calendarId=cal_id,
-                    timeMin=start,
-                    timeMax=end,
-                    singleEvents=True,
-                    orderBy="startTime",
-                ).execute()
-                all_events.extend(events_result.get("items", []))
-            except Exception:
-                continue
-
-        # 시작 시간 기준 정렬
-        all_events.sort(key=lambda e: e["start"].get("dateTime", e["start"].get("date", "")))
-
+        # 해당 날짜 필터링
         result = []
-        for e in all_events:
-            start_val = e["start"].get("dateTime", e["start"].get("date", ""))
-            if "T" in start_val:
-                t = datetime.datetime.fromisoformat(start_val).astimezone(KST)
-                time_str = t.strftime("%H:%M")
-            else:
-                time_str = "종일"
-            result.append(f"{time_str} {e.get('summary', '(제목 없음)')}")
+        date_str_basic = date.strftime("%Y%m%d")  # 20260501 형태
 
+        for e in events:
+            dtstart = e.get("dtstart", "")
+            summary = e.get("summary", "(제목 없음)")
+
+            # 날짜만 있는 경우 (종일 일정): 20260501
+            if len(dtstart) == 8 and dtstart == date_str_basic:
+                result.append(f"종일 {summary}")
+
+            # 날짜+시간인 경우: 20260501T120000Z 또는 20260501T210000
+            elif len(dtstart) > 8 and dtstart.startswith(date_str_basic):
+                try:
+                    if dtstart.endswith("Z"):
+                        # UTC → KST 변환
+                        t = datetime.datetime.strptime(dtstart, "%Y%m%dT%H%M%SZ")
+                        t = t.replace(tzinfo=datetime.timezone.utc).astimezone(KST)
+                    else:
+                        t = datetime.datetime.strptime(dtstart[:15], "%Y%m%dT%H%M%S")
+                    result.append(f"{t.strftime('%H:%M')} {summary}")
+                except Exception:
+                    result.append(f"- {summary}")
+
+        result.sort()
         return result if result else ["일정 없음"]
 
     except Exception as e:
