@@ -147,18 +147,20 @@ def get_liturgy():
 
 
 # ── 오늘의 복음 ────────────────────────────────────────
-def get_gospel():
+def get_gospel(target_date=None):
     """catholic.or.kr 미사 페이지에서 독서/복음 스크래핑.
-    전략:
-    - 페이지에서 오늘 날짜 헤더(예: '2026년 4월 30일') 이후 구간만 파싱
-    - 제1독서: '제1독서' ~ '주님의 말씀입니다' (첫 번째)
-    - 제2독서: '제2독서' ~ '주님의 말씀입니다' (있을 때만)
-    - 복음:    '✠' 또는 '거룩한 복음' ~ '그리스도님, 찬미합니다'
+    target_date 를 지정하면 해당 날짜의 복음을 가져옴 (기본값: 오늘).
     """
     import re
+    if target_date is None:
+        target_date = today
     result = {"reading1": "", "reading2": "", "gospel": ""}
     try:
-        url = "https://maria.catholic.or.kr/mi_pr/missa/missa.asp"
+        date_str = target_date.strftime("%Y-%m-%d")
+        url = (
+            f"https://maria.catholic.or.kr/mi_pr/missa/missa.asp"
+            f"?menu=missa&gomonth={date_str}&missatype=DA"
+        )
         headers = {"User-Agent": "Mozilla/5.0"}
         r = requests.get(url, headers=headers, timeout=15)
         r.encoding = "utf-8"
@@ -167,12 +169,11 @@ def get_gospel():
         raw = soup.get_text(separator="\n")
         lines = [l.strip() for l in raw.splitlines() if l.strip()]
 
-        # ── 오늘 날짜 헤더 이후부터만 파싱 ──
-        # 예: "2026년 4월 30일" 형태
+        # ── 날짜 헤더 이후부터만 파싱 ──
         date_pattern = re.compile(r"\d{4}년 \d+월 \d+일")
         body_start = 0
         for i, line in enumerate(lines):
-            if date_pattern.search(line) and today.strftime("%Y년") in line:
+            if date_pattern.search(line) and target_date.strftime("%Y년") in line:
                 body_start = i
                 break
 
@@ -184,7 +185,6 @@ def get_gospel():
 
         for line in lines:
 
-            # ── 섹션 시작 ──────────────────────
             if "제1독서" in line and current is None and not reading1_done:
                 current = "reading1"
                 continue
@@ -193,15 +193,12 @@ def get_gospel():
                 current = "reading2"
                 continue
 
-            # 복음 시작: ✠ 기호 또는 "거룩한 복음입니다"
             if ("✠" in line or "거룩한 복음입니다" in line) and current != "gospel":
                 current = "gospel"
                 sections["gospel"].append(line)
                 continue
 
-            # ── 섹션 내용 수집 및 종료 ──────────
             if current == "reading1":
-                # 제1독서 끝 마커
                 if "주님의 말씀입니다" in line or "하느님 감사합니다" in line:
                     sections["reading1"].append(line)
                     current = None
@@ -223,10 +220,9 @@ def get_gospel():
 
             elif current == "gospel":
                 sections["gospel"].append(line)
-                # 복음 끝 마커
                 if "그리스도님, 찬미합니다" in line:
                     current = None
-                    break  # 복음까지 완료되면 파싱 종료
+                    break
 
         result["reading1"] = "\n".join(sections["reading1"])
         result["reading2"] = "\n".join(sections["reading2"])
@@ -235,8 +231,6 @@ def get_gospel():
     except Exception as e:
         result["reading1"] = f"복음 오류: {e}"
     return result
-
-
 # ── 구글 캘린더 ────────────────────────────────────────
 def get_calendar_events(date: datetime.date) -> list:
     """Google Calendar API — OAuth 토큰으로 인증해서 일정 가져오기.
