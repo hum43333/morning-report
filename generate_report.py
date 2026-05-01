@@ -341,6 +341,215 @@ def get_news(paper_key: str) -> list:
         return [f"오류: {e}"]
 
 
+# ── 안경(Web Scope)용 HTML 생성 ──────────────────────────
+# Web Scope는 페이지의 HTML 구조에서 "기사 목록"을 찾아 추출하는 방식.
+# Gigazine처럼 작동하려면:
+#   - 메인 페이지: 반복되는 기사 카드 구조 (h2 > a + 날짜 + 카테고리)
+#   - 각 기사: 별도 URL의 별도 HTML 파일
+
+def html_escape(s):
+    """HTML 특수문자 escape."""
+    if s is None:
+        return ""
+    return (str(s)
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;"))
+
+
+def text_to_html_paragraphs(text):
+    """줄바꿈이 들어있는 일반 텍스트를 <p>로 감싼 HTML로 변환."""
+    if not text:
+        return "<p>정보 없음</p>"
+    paragraphs = []
+    current = []
+    for line in text.split("\n"):
+        if line.strip() == "":
+            if current:
+                paragraphs.append("\n".join(current))
+                current = []
+        else:
+            current.append(line)
+    if current:
+        paragraphs.append("\n".join(current))
+    if not paragraphs:
+        return "<p>정보 없음</p>"
+    return "\n".join(
+        "<p>" + html_escape(p).replace("\n", "<br>") + "</p>"
+        for p in paragraphs
+    )
+
+
+def write_article_page(filename, title, body_html, date_str, category):
+    """안경용 개별 기사 HTML 파일 한 개 작성."""
+    html = f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{html_escape(title)}</title>
+</head>
+<body>
+<article>
+<h1>{html_escape(title)}</h1>
+<p><time datetime="{html_escape(date_str)}">{html_escape(date_str)}</time>
+&nbsp;<span class="category">{html_escape(category)}</span></p>
+{body_html}
+</article>
+</body>
+</html>
+"""
+    os.makedirs("glasses", exist_ok=True)
+    with open(f"glasses/{filename}", "w", encoding="utf-8") as f:
+        f.write(html)
+
+
+def write_glasses_index(report, articles):
+    """안경용 메인 목록 페이지 (기사 카드 반복 구조).
+
+    articles: [(filename, title, category), ...]
+    """
+    date_str = report["date"]
+    items_html = []
+    for fname, title, category in articles:
+        items_html.append(f"""
+<article class="entry">
+<h2><a href="{html_escape(fname)}">{html_escape(title)}</a></h2>
+<p><time datetime="{html_escape(date_str)}">{html_escape(date_str)}</time>
+&nbsp;<a href="{html_escape(fname)}" class="category">{html_escape(category)}</a></p>
+</article>
+""".strip())
+
+    items_block = "\n\n".join(items_html)
+
+    html = f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>모닝 리포트 {html_escape(date_str)}</title>
+<meta name="description" content="모닝 리포트 {html_escape(date_str)}">
+</head>
+<body>
+<header>
+<h1>모닝 리포트</h1>
+<p>{html_escape(date_str)}</p>
+</header>
+
+<main>
+{items_block}
+</main>
+
+<footer>
+<p>생성: {html_escape(report.get("generated_at", ""))}</p>
+</footer>
+</body>
+</html>
+"""
+    os.makedirs("glasses", exist_ok=True)
+    with open("glasses/index.html", "w", encoding="utf-8") as f:
+        f.write(html)
+
+
+def build_glasses_pages(report):
+    """report 딕셔너리로부터 안경용 HTML 6개 + 목록 페이지 1개를 만든다."""
+    date_str = report["date"]
+
+    # ── 1. 날씨 ──
+    w = report.get("weather", {})
+    if isinstance(w, str):
+        weather_body = f"<p>{html_escape(w)}</p>"
+    else:
+        parts = []
+        for key, label in [("morning", "아침"), ("afternoon", "낮"), ("evening", "저녁")]:
+            val = (w or {}).get(key) or "정보 없음"
+            parts.append(f"<h2>{html_escape(label)}</h2><p>{html_escape(val)}</p>")
+        weather_body = "\n".join(parts)
+    write_article_page("01-weather.html", "오늘의 날씨", weather_body, date_str, "날씨")
+
+    # ── 2. 성무일도 ──
+    liturgy_body = text_to_html_paragraphs(report.get("liturgy", ""))
+    write_article_page("02-liturgy.html", "오늘의 성무일도", liturgy_body, date_str, "기도")
+
+    # ── 3. 오늘의 복음 ──
+    def gospel_to_html(g):
+        if not g:
+            return "<p>정보 없음</p>"
+        parts = []
+        if g.get("reading1"):
+            parts.append("<h2>제1독서</h2>" + text_to_html_paragraphs(g["reading1"]))
+        if g.get("reading2"):
+            parts.append("<h2>제2독서</h2>" + text_to_html_paragraphs(g["reading2"]))
+        if g.get("gospel"):
+            parts.append("<h2>복음</h2>" + text_to_html_paragraphs(g["gospel"]))
+        return "\n".join(parts) if parts else "<p>정보 없음</p>"
+
+    write_article_page("03-gospel.html", "오늘의 복음",
+                       gospel_to_html(report.get("gospel")), date_str, "복음")
+
+    # ── 4. 내일의 복음 ──
+    write_article_page("04-gospel-tomorrow.html", "내일의 복음",
+                       gospel_to_html(report.get("gospel_tomorrow")), date_str, "복음")
+
+    # ── 5. 일정 ──
+    cal = report.get("calendar", {}) or {}
+    cal_parts = []
+    for key, label in [("yesterday", "어제"), ("today", "오늘"), ("tomorrow", "내일")]:
+        events = [e for e in (cal.get(key) or []) if e and e.strip() != "일정 없음"]
+        cal_parts.append(f"<h2>{html_escape(label)}</h2>")
+        if events:
+            cal_parts.append("<ul>")
+            for e in events:
+                cal_parts.append(f"<li>{html_escape(e)}</li>")
+            cal_parts.append("</ul>")
+        else:
+            cal_parts.append("<p>일정 없음</p>")
+    write_article_page("05-calendar.html", "일정", "\n".join(cal_parts), date_str, "일정")
+
+    # ── 6. 신문 ──
+    news = report.get("news", {}) or {}
+    paper_names = {
+        "hankyoreh": "한겨레",
+        "chosun":    "조선일보",
+        "jtbc":      "JTBC",
+        "joongang":  "JTBC",
+        "donga":     "동아일보",
+    }
+    news_parts = []
+    seen = set()
+    for key in ["hankyoreh", "chosun", "jtbc", "joongang", "donga"]:
+        if key not in news:
+            continue
+        display = paper_names.get(key, key)
+        if display in seen:
+            continue
+        seen.add(display)
+        articles_list = news.get(key) or []
+        news_parts.append(f"<h2>{html_escape(display)}</h2>")
+        if articles_list:
+            news_parts.append("<ol>")
+            for t in articles_list:
+                news_parts.append(f"<li>{html_escape(t)}</li>")
+            news_parts.append("</ol>")
+        else:
+            news_parts.append("<p>정보 없음</p>")
+    write_article_page("06-news.html", "주요 신문 기사",
+                       "\n".join(news_parts), date_str, "뉴스")
+
+    # ── 메인 목록 페이지 ──
+    articles = [
+        ("01-weather.html",         "오늘의 날씨",       "날씨"),
+        ("02-liturgy.html",         "오늘의 성무일도",   "기도"),
+        ("03-gospel.html",          "오늘의 복음",       "복음"),
+        ("04-gospel-tomorrow.html", "내일의 복음",       "복음"),
+        ("05-calendar.html",        "일정",              "일정"),
+        ("06-news.html",            "주요 신문 기사",    "뉴스"),
+    ]
+    write_glasses_index(report, articles)
+    print("glasses/ 폴더에 안경용 HTML 7개 생성 완료!")
+
+
 # ── 메인 ───────────────────────────────────────────────
 def main():
     print("리포트 생성 시작...")
@@ -369,6 +578,12 @@ def main():
         json.dump(report, f, ensure_ascii=False, indent=2)
 
     print("report.json 생성 완료!")
+
+    # 안경(Web Scope)용 HTML 생성
+    try:
+        build_glasses_pages(report)
+    except Exception as e:
+        print(f"안경용 HTML 생성 오류: {e}")
 
 
 if __name__ == "__main__":
