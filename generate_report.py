@@ -329,7 +329,7 @@ def main():
         "generated_at": now.strftime("%Y-%m-%d %H:%M"),
         "weather": get_weather(),
         "liturgy": get_liturgy(),
-        "gospel":          get_gospel(today),
+        "gospel":         get_gospel(today),
         "gospel_tomorrow": get_gospel(tomorrow),
         "calendar": {
             "yesterday": get_calendar_events(yesterday),
