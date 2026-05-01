@@ -304,7 +304,7 @@ def get_news(paper_key: str) -> list:
     rss_urls = {
         "hankyoreh": "https://www.hani.co.kr/rss/",
         "chosun":    "https://www.chosun.com/arc/outboundfeeds/rss/?outputType=xml",
-        "joongang":  "https://rss.joins.com/joins_news_list.xml",
+        "joongang":  "https://fs.jtbc.co.kr/RSS/newsflash.xml",
         "donga":     "https://rss.donga.com/total.xml",
     }
     url = rss_urls.get(paper_key)
