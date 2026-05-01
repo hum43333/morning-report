@@ -233,25 +233,33 @@ def get_gospel(target_date=None):
     return result
 # ── 구글 캘린더 ────────────────────────────────────────
 def get_calendar_events(date: datetime.date) -> list:
-    """Google Calendar API — OAuth 토큰으로 인증해서 일정 가져오기.
-    구독 캘린더(@import.calendar.google.com 포함) 모두 접근 가능.
-    """
-    GOOGLE_OAUTH_TOKEN = os.environ.get("GOOGLE_OAUTH_TOKEN", "")
-    if not GOOGLE_OAUTH_TOKEN:
-        return ["(캘린더 설정 필요: GOOGLE_OAUTH_TOKEN)"]
+    """Google Calendar API — 서비스 계정(GOOGLE_CALENDAR_CREDS)으로 인증."""
+    GOOGLE_CALENDAR_CREDS = os.environ.get("GOOGLE_CALENDAR_CREDS", "")
+    if not GOOGLE_CALENDAR_CREDS:
+        return ["(캘린더 설정 필요: GOOGLE_CALENDAR_CREDS)"]
     try:
-        from google.oauth2.credentials import Credentials
+        from google.oauth2 import service_account
         from googleapiclient.discovery import build
 
-        token_data = json.loads(GOOGLE_OAUTH_TOKEN)
-        creds = Credentials(
-            token=token_data.get("token"),
-            refresh_token=token_data.get("refresh_token"),
-            token_uri=token_data.get("token_uri", "https://oauth2.googleapis.com/token"),
-            client_id=token_data.get("client_id"),
-            client_secret=token_data.get("client_secret"),
-            scopes=token_data.get("scopes"),
-        )
+        creds_data = json.loads(GOOGLE_CALENDAR_CREDS)
+
+        # 서비스 계정 방식과 OAuth 방식 둘 다 대응
+        if creds_data.get("type") == "service_account":
+            creds = service_account.Credentials.from_service_account_info(
+                creds_data,
+                scopes=["https://www.googleapis.com/auth/calendar.readonly"],
+            )
+        else:
+            # OAuth 클라이언트 방식 (authorized_user 타입)
+            from google.oauth2.credentials import Credentials
+            creds = Credentials(
+                token=creds_data.get("token"),
+                refresh_token=creds_data.get("refresh_token"),
+                token_uri=creds_data.get("token_uri", "https://oauth2.googleapis.com/token"),
+                client_id=creds_data.get("client_id"),
+                client_secret=creds_data.get("client_secret"),
+                scopes=creds_data.get("scopes"),
+            )
 
         service = build("calendar", "v3", credentials=creds)
 
@@ -259,9 +267,11 @@ def get_calendar_events(date: datetime.date) -> list:
         start = datetime.datetime.combine(date, datetime.time.min).replace(tzinfo=KST).isoformat()
         end   = datetime.datetime.combine(date, datetime.time.max).replace(tzinfo=KST).isoformat()
 
-        # CALENDAR_ID 파싱
-        # 수정 후
-        calendar_ids = ["primary"]
+        # 접근 가능한 캘린더 목록 자동 조회
+        cal_list = service.calendarList().list().execute()
+        calendar_ids = [c["id"] for c in cal_list.get("items", [])]
+        if not calendar_ids:
+            calendar_ids = ["primary"]
         print(f"캘린더 ID 목록 ({len(calendar_ids)}개): {calendar_ids}")
 
         all_events = []
@@ -272,17 +282,14 @@ def get_calendar_events(date: datetime.date) -> list:
                     timeMin=start,
                     timeMax=end,
                     singleEvents=True,
-                    orderBy="startTime"
+                    orderBy="startTime",
                 ).execute()
                 all_events.extend(events_result.get("items", []))
             except Exception:
                 continue
 
-        # 시작 시간 기준으로 정렬
-        def sort_key(e):
-            return e["start"].get("dateTime", e["start"].get("date", ""))
-
-        all_events.sort(key=sort_key)
+        # 시작 시간 기준 정렬
+        all_events.sort(key=lambda e: e["start"].get("dateTime", e["start"].get("date", "")))
 
         result = []
         for e in all_events:
@@ -295,10 +302,9 @@ def get_calendar_events(date: datetime.date) -> list:
             result.append(f"{time_str} {e.get('summary', '(제목 없음)')}")
 
         return result if result else ["일정 없음"]
+
     except Exception as e:
         return [f"캘린더 오류: {e}"]
-
-
 # ── 신문 RSS ───────────────────────────────────────────
 def get_news(paper_key: str) -> list:
     """각 신문사 RSS에서 기사 제목 3개 추출"""
