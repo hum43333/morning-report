@@ -167,10 +167,11 @@
     };
 
     const PAPER_NAMES = {
-      hankyoreh: '한겨레',
-      chosun:    '조선일보',
-      jtbc:  'JTBC',
-      donga:     '동아일보',
+  hankyoreh: '한겨레',
+  chosun:    '조선일보',
+  jtbc:      'JTBC',
+  joongang:  'JTBC',
+  donga:     '동아일보',
     };
 
     async function loadReport() {
@@ -279,7 +280,9 @@
       }
 
       if (section === 'news') {
-        return ['hankyoreh', 'chosun', 'joongang', 'donga'].map(key => {
+        const papers = (d.news || {});
+const paperKeys = ['hankyoreh', 'chosun', papers.jtbc ? 'jtbc' : 'joongang', 'donga'];
+return paperKeys.map(key => {
           const articles = (d.news || {})[key] || [];
           const items = articles.length
             ? articles.map((t, i) =>
