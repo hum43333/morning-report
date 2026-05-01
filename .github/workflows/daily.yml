@@ -28,9 +28,9 @@ jobs:
 
       - name: 리포트 생성
         env:
-        WEATHER_API_KEY: ${{ secrets.WEATHER_API_KEY }}
-        GOOGLE_OAUTH_TOKEN: ${{ secrets.GOOGLE_OAUTH_TOKEN }}
-        GOOGLE_CALENDAR_CREDS: ${{ secrets.GOOGLE_CALENDAR_CREDS }}
+          WEATHER_API_KEY: ${{ secrets.WEATHER_API_KEY }}
+          GOOGLE_OAUTH_TOKEN: ${{ secrets.GOOGLE_OAUTH_TOKEN }}
+          GOOGLE_CALENDAR_CREDS: ${{ secrets.GOOGLE_CALENDAR_CREDS }}
         run: python generate_report.py
 
       - name: report.json 커밋 & 푸시
