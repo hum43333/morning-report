@@ -383,11 +383,15 @@ def split_into_sentences(text):
 
 
 def text_to_html_paragraphs(text):
-    """줄바꿈이 들어있는 일반 텍스트를 <p>로 감싼 HTML로 변환.
+    """줄바꿈이 들어있는 일반 텍스트를 안경(Web Scope)에서도 줄바꿈이 보존되도록 변환.
 
-    가시성 개선:
-    - 빈 줄로 구분된 단락 사이: 빈 단락 하나 추가 (이중 여백)
-    - 단락 내부: 원래 줄바꿈을 유지 + 문장 끝 기호 뒤도 추가로 줄바꿈
+    핵심: <br>이나 빈 <p>는 추출 도구가 무시하므로, <pre> 태그를 사용해 실제
+    줄바꿈 문자가 본문에 남도록 한다. <pre>는 공백/줄바꿈을 그대로 보존하는
+    태그이며 동시에 일반 본문으로 인식된다.
+
+    가시성:
+    - 빈 줄로 구분된 단락 사이: 빈 줄 한 줄 (실제 \n\n)
+    - 단락 내부: 원래 줄바꿈 유지 + 문장 끝 기호 뒤에서 추가 줄바꿈
     """
     if not text:
         return "<p>정보 없음</p>"
@@ -408,8 +412,8 @@ def text_to_html_paragraphs(text):
     if not paragraphs:
         return "<p>정보 없음</p>"
 
-    # 2) 각 단락의 각 줄을 다시 문장 단위로 쪼개서 <br>로 연결
-    out_parts = []
+    # 2) 각 단락의 각 줄을 다시 문장 단위로 쪼개고, 실제 줄바꿈 문자로 연결
+    out_blocks = []
     for para_lines in paragraphs:
         sentences_in_para = []
         for line in para_lines:
@@ -417,16 +421,13 @@ def text_to_html_paragraphs(text):
                 sentences_in_para.append(s)
         if not sentences_in_para:
             continue
-        body = "<br>".join(html_escape(s) for s in sentences_in_para)
-        out_parts.append(f"<p>{body}</p>")
-        # 단락 사이에 빈 단락 한 줄 추가 → 더 시원하게
-        out_parts.append("<p>&nbsp;</p>")
+        # 한 단락 안에서는 문장마다 한 줄
+        out_blocks.append("\n".join(sentences_in_para))
 
-    # 마지막 빈 단락은 제거
-    if out_parts and out_parts[-1] == "<p>&nbsp;</p>":
-        out_parts.pop()
-
-    return "\n".join(out_parts)
+    # 3) 단락 사이는 빈 줄 한 줄(\n\n)
+    body_text = "\n\n".join(out_blocks)
+    # 4) <pre>로 감싸서 공백/줄바꿈을 그대로 보존
+    return f"<pre>{html_escape(body_text)}</pre>"
 
 
 def write_article_page(filename, title, body_html, date_str, category):
@@ -437,11 +438,17 @@ def write_article_page(filename, title, body_html, date_str, category):
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{html_escape(title)}</title>
+<style>
+body {{ font-family: sans-serif; max-width: 700px; margin: 20px auto; padding: 0 20px; line-height: 1.7; }}
+pre {{ font-family: inherit; white-space: pre-wrap; word-break: keep-all; font-size: 1em; margin: 0; }}
+h1 {{ font-size: 1.5em; }}
+.meta {{ color: #888; font-size: 0.9em; margin-bottom: 1.5em; }}
+</style>
 </head>
 <body>
 <article>
 <h1>{html_escape(title)}</h1>
-<p><time datetime="{html_escape(date_str)}">{html_escape(date_str)}</time>
+<p class="meta"><time datetime="{html_escape(date_str)}">{html_escape(date_str)}</time>
 &nbsp;<span class="category">{html_escape(category)}</span></p>
 {body_html}
 </article>
@@ -504,20 +511,25 @@ def build_glasses_pages(report):
     """report 딕셔너리로부터 안경용 HTML 6개 + 목록 페이지 1개를 만든다."""
     date_str = report["date"]
 
+    # 공통 도우미: 텍스트 블록 → <pre>로 감싼 HTML
+    def text_block_to_pre(text):
+        return f"<pre>{html_escape(text)}</pre>"
+
     # ── 1. 날씨 ──
     w = report.get("weather", {})
     if isinstance(w, str):
-        weather_body = f"<p>{html_escape(w)}</p>"
+        weather_body = text_block_to_pre(w)
     else:
-        parts = []
+        lines = []
         for key, label in [("morning", "아침"), ("afternoon", "낮"), ("evening", "저녁")]:
             val = (w or {}).get(key) or "정보 없음"
-            parts.append(f"<h2>{html_escape(label)}</h2>")
-            parts.append(f"<p>{html_escape(val)}</p>")
-            parts.append("<p>&nbsp;</p>")  # 시간대 사이 여백
-        if parts and parts[-1] == "<p>&nbsp;</p>":
-            parts.pop()
-        weather_body = "\n".join(parts)
+            lines.append(f"[ {label} ]")
+            lines.append(val)
+            lines.append("")  # 빈 줄
+        # 마지막 빈 줄 제거
+        while lines and lines[-1] == "":
+            lines.pop()
+        weather_body = text_block_to_pre("\n".join(lines))
     write_article_page("01-weather.html", "오늘의 날씨", weather_body, date_str, "날씨")
 
     # ── 2. 성무일도 ──
@@ -527,25 +539,33 @@ def build_glasses_pages(report):
     # ── 3. 오늘의 복음 ──
     def gospel_to_html(g):
         if not g:
-            return "<p>정보 없음</p>"
-        parts = []
-        if g.get("reading1"):
-            parts.append("<h2>제1독서</h2>")
-            parts.append("<p>&nbsp;</p>")
-            parts.append(text_to_html_paragraphs(g["reading1"]))
-            parts.append("<p>&nbsp;</p>")
-            parts.append("<p>&nbsp;</p>")
-        if g.get("reading2"):
-            parts.append("<h2>제2독서</h2>")
-            parts.append("<p>&nbsp;</p>")
-            parts.append(text_to_html_paragraphs(g["reading2"]))
-            parts.append("<p>&nbsp;</p>")
-            parts.append("<p>&nbsp;</p>")
-        if g.get("gospel"):
-            parts.append("<h2>복음</h2>")
-            parts.append("<p>&nbsp;</p>")
-            parts.append(text_to_html_paragraphs(g["gospel"]))
-        return "\n".join(parts) if parts else "<p>정보 없음</p>"
+            return text_block_to_pre("정보 없음")
+        # 모든 부분을 한 덩어리의 텍스트로 합쳐 <pre>로 감싸기
+        sections = []
+        for label, key in [("[ 제1독서 ]", "reading1"),
+                           ("[ 제2독서 ]", "reading2"),
+                           ("[ 복음 ]",     "gospel")]:
+            content = (g.get(key) or "").strip()
+            if not content:
+                continue
+            # 각 줄에 대해 문장 단위 줄바꿈 적용
+            processed_lines = []
+            for paragraph in content.split("\n\n"):
+                para_sentences = []
+                for line in paragraph.split("\n"):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    for s in split_into_sentences(line):
+                        para_sentences.append(s)
+                if para_sentences:
+                    processed_lines.append("\n".join(para_sentences))
+            processed = "\n\n".join(processed_lines)
+            sections.append(f"{label}\n\n{processed}")
+        if not sections:
+            return text_block_to_pre("정보 없음")
+        # 섹션 사이는 빈 줄 두 줄
+        return text_block_to_pre("\n\n\n".join(sections))
 
     write_article_page("03-gospel.html", "오늘의 복음",
                        gospel_to_html(report.get("gospel")), date_str, "복음")
@@ -556,20 +576,20 @@ def build_glasses_pages(report):
 
     # ── 5. 일정 ──
     cal = report.get("calendar", {}) or {}
-    cal_parts = []
+    cal_lines = []
     for key, label in [("yesterday", "어제"), ("today", "오늘"), ("tomorrow", "내일")]:
         events = [e for e in (cal.get(key) or []) if e and e.strip() != "일정 없음"]
-        cal_parts.append(f"<h2>{html_escape(label)}</h2>")
+        cal_lines.append(f"[ {label} ]")
         if events:
-            # 각 일정을 별도 <p>로 → 항목 사이 자연스러운 여백
             for e in events:
-                cal_parts.append(f"<p>{html_escape(e)}</p>")
+                cal_lines.append(e)
         else:
-            cal_parts.append("<p>일정 없음</p>")
-        cal_parts.append("<p>&nbsp;</p>")  # 어제/오늘/내일 사이 여백
-    if cal_parts and cal_parts[-1] == "<p>&nbsp;</p>":
-        cal_parts.pop()
-    write_article_page("05-calendar.html", "일정", "\n".join(cal_parts), date_str, "일정")
+            cal_lines.append("일정 없음")
+        cal_lines.append("")  # 어제/오늘/내일 사이 빈 줄
+    while cal_lines and cal_lines[-1] == "":
+        cal_lines.pop()
+    write_article_page("05-calendar.html", "일정",
+                       text_block_to_pre("\n".join(cal_lines)), date_str, "일정")
 
     # ── 6. 신문 ──
     news = report.get("news", {}) or {}
@@ -580,7 +600,7 @@ def build_glasses_pages(report):
         "joongang":  "JTBC",
         "donga":     "동아일보",
     }
-    news_parts = []
+    news_lines = []
     seen = set()
     for key in ["hankyoreh", "chosun", "jtbc", "joongang", "donga"]:
         if key not in news:
@@ -590,18 +610,17 @@ def build_glasses_pages(report):
             continue
         seen.add(display)
         articles_list = news.get(key) or []
-        news_parts.append(f"<h2>{html_escape(display)}</h2>")
+        news_lines.append(f"[ {display} ]")
         if articles_list:
             for i, t in enumerate(articles_list, 1):
-                # 각 기사를 별도 단락으로
-                news_parts.append(f"<p>{i}. {html_escape(t)}</p>")
+                news_lines.append(f"{i}. {t}")
         else:
-            news_parts.append("<p>정보 없음</p>")
-        news_parts.append("<p>&nbsp;</p>")  # 신문사 사이 여백
-    if news_parts and news_parts[-1] == "<p>&nbsp;</p>":
-        news_parts.pop()
+            news_lines.append("정보 없음")
+        news_lines.append("")  # 신문사 사이 빈 줄
+    while news_lines and news_lines[-1] == "":
+        news_lines.pop()
     write_article_page("06-news.html", "주요 신문 기사",
-                       "\n".join(news_parts), date_str, "뉴스")
+                       text_block_to_pre("\n".join(news_lines)), date_str, "뉴스")
 
     # ── 메인 목록 페이지 ──
     articles = [
