@@ -341,11 +341,15 @@ def get_news(paper_key: str) -> list:
         return [f"오류: {e}"]
 
 
-# ── 안경(Web Scope)용 HTML 생성 ──────────────────────────
-# Web Scope는 페이지의 HTML 구조에서 "기사 목록"을 찾아 추출하는 방식.
-# Gigazine처럼 작동하려면:
-#   - 메인 페이지: 반복되는 기사 카드 구조 (h2 > a + 날짜 + 카테고리)
-#   - 각 기사: 별도 URL의 별도 HTML 파일
+
+
+
+# ── 안경(Web Reader)용 HTML 생성 ──────────────────────────
+# Web Reader는 r.jina.ai 같은 본문 추출기로 페이지 본문을 텍스트화하여 안경에 표시.
+# 핵심 원칙:
+#   1. 자바스크립트 의존 NO → 모든 콘텐츠가 HTML에 미리 박혀 있어야 함
+#   2. 단순한 의미적 HTML (h1/h2/p) 사용 → 본문 추출이 정확함
+#   3. 6개 섹션을 별도 HTML 파일로 → 안경에 각각 따로 등록 가능
 
 def html_escape(s):
     """HTML 특수문자 escape."""
@@ -358,98 +362,58 @@ def html_escape(s):
             .replace('"', "&quot;"))
 
 
-def split_into_sentences(text):
-    """한 줄 안에서 문장 끝 기호(. ? ! 。 ？ ！) 뒤를 문장 단위로 분리.
-    안경에서 한 문장씩 한 줄로 보이게 하기 위함.
-    """
-    import re
-    # 문장 끝 기호 + (선택적 따옴표/괄호) + 공백 또는 줄끝 기준으로 분리
-    # 단, "1.", "2." 같은 번호는 분리하지 않도록 앞에 한글/한자/영문이 있을 때만
-    pattern = r'(?<=[가-힣A-Za-z\)\]」』"\'])([.?!。？！])\s+'
-    parts = re.split(pattern, text)
-    # re.split는 분리 기준 문자도 반환하므로 다시 합쳐줌
-    sentences = []
-    buf = ""
-    for i, p in enumerate(parts):
-        if p in ".?!。？！":
-            buf += p
-            sentences.append(buf.strip())
-            buf = ""
-        else:
-            buf += p
-    if buf.strip():
-        sentences.append(buf.strip())
-    return [s for s in sentences if s]
-
-
-def text_to_html_paragraphs(text):
-    """줄바꿈이 들어있는 일반 텍스트를 안경(Web Scope)에서도 줄바꿈이 보존되도록 변환.
-
-    핵심: <br>이나 빈 <p>는 추출 도구가 무시하므로, <pre> 태그를 사용해 실제
-    줄바꿈 문자가 본문에 남도록 한다. <pre>는 공백/줄바꿈을 그대로 보존하는
-    태그이며 동시에 일반 본문으로 인식된다.
-
-    가시성:
-    - 빈 줄로 구분된 단락 사이: 빈 줄 한 줄 (실제 \n\n)
-    - 단락 내부: 원래 줄바꿈 유지 + 문장 끝 기호 뒤에서 추가 줄바꿈
+def text_to_paragraphs_html(text):
+    """줄바꿈이 들어있는 텍스트를 <p> 태그로 감싼 HTML로 변환.
+    빈 줄 단위로 단락을 나누고, 단락 내부의 줄바꿈은 <br>로 보존.
     """
     if not text:
         return "<p>정보 없음</p>"
-
-    # 1) 빈 줄로 단락 나누기
     paragraphs = []
     current = []
     for line in text.split("\n"):
         if line.strip() == "":
             if current:
-                paragraphs.append(current)
+                paragraphs.append("\n".join(current))
                 current = []
         else:
-            current.append(line.strip())
+            current.append(line)
     if current:
-        paragraphs.append(current)
-
+        paragraphs.append("\n".join(current))
     if not paragraphs:
         return "<p>정보 없음</p>"
-
-    # 2) 각 단락의 각 줄을 다시 문장 단위로 쪼개고, 실제 줄바꿈 문자로 연결
-    out_blocks = []
-    for para_lines in paragraphs:
-        sentences_in_para = []
-        for line in para_lines:
-            for s in split_into_sentences(line):
-                sentences_in_para.append(s)
-        if not sentences_in_para:
-            continue
-        # 한 단락 안에서는 문장마다 한 줄
-        out_blocks.append("\n".join(sentences_in_para))
-
-    # 3) 단락 사이는 빈 줄 한 줄(\n\n)
-    body_text = "\n\n".join(out_blocks)
-    # 4) <pre>로 감싸서 공백/줄바꿈을 그대로 보존
-    return f"<pre>{html_escape(body_text)}</pre>"
+    return "\n".join(
+        "<p>" + html_escape(p).replace("\n", "<br>") + "</p>"
+        for p in paragraphs
+    )
 
 
-def write_article_page(filename, title, body_html, date_str, category):
-    """안경용 개별 기사 HTML 파일 한 개 작성."""
+def write_section_page(filename, title, body_html, date_str):
+    """안경(Web Reader)용 개별 섹션 HTML 파일 작성.
+
+    Web Reader 친화적 구조:
+    - <article> 안에 본문이 모두 들어 있음
+    - 자바스크립트 없음
+    - 단순한 의미적 태그만 사용
+    """
     html = f"""<!DOCTYPE html>
 <html lang="ko">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{html_escape(title)}</title>
+<title>{html_escape(title)} ({html_escape(date_str)})</title>
+<meta name="description" content="{html_escape(title)} - {html_escape(date_str)}">
 <style>
-body {{ font-family: sans-serif; max-width: 700px; margin: 20px auto; padding: 0 20px; line-height: 1.7; }}
-pre {{ font-family: inherit; white-space: pre-wrap; word-break: keep-all; font-size: 1em; margin: 0; }}
-h1 {{ font-size: 1.5em; }}
+body {{ font-family: sans-serif; max-width: 700px; margin: 20px auto; padding: 0 20px; line-height: 1.7; color: #222; }}
+h1 {{ font-size: 1.6em; border-bottom: 2px solid #333; padding-bottom: 0.3em; }}
+h2 {{ font-size: 1.2em; margin-top: 1.5em; color: #333; }}
 .meta {{ color: #888; font-size: 0.9em; margin-bottom: 1.5em; }}
+p {{ margin: 0.8em 0; }}
 </style>
 </head>
 <body>
 <article>
 <h1>{html_escape(title)}</h1>
-<p class="meta"><time datetime="{html_escape(date_str)}">{html_escape(date_str)}</time>
-&nbsp;<span class="category">{html_escape(category)}</span></p>
+<p class="meta">{html_escape(date_str)}</p>
 {body_html}
 </article>
 </body>
@@ -460,138 +424,68 @@ h1 {{ font-size: 1.5em; }}
         f.write(html)
 
 
-def write_glasses_index(report, articles):
-    """안경용 메인 목록 페이지 (기사 카드 반복 구조).
+def build_glasses_pages(report):
+    """report 딕셔너리로부터 안경(Web Reader)용 HTML 6개를 만든다.
 
-    articles: [(filename, title, category), ...]
+    각 파일은 안경에 따로 등록할 수 있는 독립 페이지.
     """
     date_str = report["date"]
-    items_html = []
-    for fname, title, category in articles:
-        items_html.append(f"""
-<article class="entry">
-<h2><a href="{html_escape(fname)}">{html_escape(title)}</a></h2>
-<p><time datetime="{html_escape(date_str)}">{html_escape(date_str)}</time>
-&nbsp;<a href="{html_escape(fname)}" class="category">{html_escape(category)}</a></p>
-</article>
-""".strip())
 
-    items_block = "\n\n".join(items_html)
-
-    html = f"""<!DOCTYPE html>
-<html lang="ko">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>모닝 리포트 {html_escape(date_str)}</title>
-<meta name="description" content="모닝 리포트 {html_escape(date_str)}">
-</head>
-<body>
-<header>
-<h1>모닝 리포트</h1>
-<p>{html_escape(date_str)}</p>
-</header>
-
-<main>
-{items_block}
-</main>
-
-<footer>
-<p>생성: {html_escape(report.get("generated_at", ""))}</p>
-</footer>
-</body>
-</html>
-"""
-    os.makedirs("glasses", exist_ok=True)
-    with open("glasses/index.html", "w", encoding="utf-8") as f:
-        f.write(html)
-
-
-def build_glasses_pages(report):
-    """report 딕셔너리로부터 안경용 HTML 6개 + 목록 페이지 1개를 만든다."""
-    date_str = report["date"]
-
-    # 공통 도우미: 텍스트 블록 → <pre>로 감싼 HTML
-    def text_block_to_pre(text):
-        return f"<pre>{html_escape(text)}</pre>"
-
-    # ── 1. 날씨 ──
+    # ── 1. 오늘의 날씨 ──
     w = report.get("weather", {})
     if isinstance(w, str):
-        weather_body = text_block_to_pre(w)
+        weather_body = f"<p>{html_escape(w)}</p>"
     else:
-        lines = []
+        parts = []
         for key, label in [("morning", "아침"), ("afternoon", "낮"), ("evening", "저녁")]:
             val = (w or {}).get(key) or "정보 없음"
-            lines.append(f"[ {label} ]")
-            lines.append(val)
-            lines.append("")  # 빈 줄
-        # 마지막 빈 줄 제거
-        while lines and lines[-1] == "":
-            lines.pop()
-        weather_body = text_block_to_pre("\n".join(lines))
-    write_article_page("01-weather.html", "오늘의 날씨", weather_body, date_str, "날씨")
+            parts.append(f"<h2>{html_escape(label)}</h2>")
+            parts.append(f"<p>{html_escape(val)}</p>")
+        weather_body = "\n".join(parts)
+    write_section_page("01-weather.html", "오늘의 날씨", weather_body, date_str)
 
-    # ── 2. 성무일도 ──
-    liturgy_body = text_to_html_paragraphs(report.get("liturgy", ""))
-    write_article_page("02-liturgy.html", "오늘의 성무일도", liturgy_body, date_str, "기도")
+    # ── 2. 오늘의 성무일도 ──
+    liturgy_body = text_to_paragraphs_html(report.get("liturgy", ""))
+    write_section_page("02-liturgy.html", "오늘의 성무일도", liturgy_body, date_str)
 
     # ── 3. 오늘의 복음 ──
     def gospel_to_html(g):
         if not g:
-            return text_block_to_pre("정보 없음")
-        # 모든 부분을 한 덩어리의 텍스트로 합쳐 <pre>로 감싸기
-        sections = []
-        for label, key in [("[ 제1독서 ]", "reading1"),
-                           ("[ 제2독서 ]", "reading2"),
-                           ("[ 복음 ]",     "gospel")]:
-            content = (g.get(key) or "").strip()
-            if not content:
-                continue
-            # 각 줄에 대해 문장 단위 줄바꿈 적용
-            processed_lines = []
-            for paragraph in content.split("\n\n"):
-                para_sentences = []
-                for line in paragraph.split("\n"):
-                    line = line.strip()
-                    if not line:
-                        continue
-                    for s in split_into_sentences(line):
-                        para_sentences.append(s)
-                if para_sentences:
-                    processed_lines.append("\n".join(para_sentences))
-            processed = "\n\n".join(processed_lines)
-            sections.append(f"{label}\n\n{processed}")
-        if not sections:
-            return text_block_to_pre("정보 없음")
-        # 섹션 사이는 빈 줄 두 줄
-        return text_block_to_pre("\n\n\n".join(sections))
+            return "<p>정보 없음</p>"
+        parts = []
+        if g.get("reading1"):
+            parts.append("<h2>제1독서</h2>")
+            parts.append(text_to_paragraphs_html(g["reading1"]))
+        if g.get("reading2"):
+            parts.append("<h2>제2독서</h2>")
+            parts.append(text_to_paragraphs_html(g["reading2"]))
+        if g.get("gospel"):
+            parts.append("<h2>복음</h2>")
+            parts.append(text_to_paragraphs_html(g["gospel"]))
+        return "\n".join(parts) if parts else "<p>정보 없음</p>"
 
-    write_article_page("03-gospel.html", "오늘의 복음",
-                       gospel_to_html(report.get("gospel")), date_str, "복음")
+    write_section_page("03-gospel.html", "오늘의 복음",
+                       gospel_to_html(report.get("gospel")), date_str)
 
     # ── 4. 내일의 복음 ──
-    write_article_page("04-gospel-tomorrow.html", "내일의 복음",
-                       gospel_to_html(report.get("gospel_tomorrow")), date_str, "복음")
+    write_section_page("04-gospel-tomorrow.html", "내일의 복음",
+                       gospel_to_html(report.get("gospel_tomorrow")), date_str)
 
     # ── 5. 일정 ──
     cal = report.get("calendar", {}) or {}
-    cal_lines = []
+    cal_parts = []
     for key, label in [("yesterday", "어제"), ("today", "오늘"), ("tomorrow", "내일")]:
         events = [e for e in (cal.get(key) or []) if e and e.strip() != "일정 없음"]
-        cal_lines.append(f"[ {label} ]")
+        cal_parts.append(f"<h2>{html_escape(label)}</h2>")
         if events:
             for e in events:
-                cal_lines.append(e)
+                cal_parts.append(f"<p>{html_escape(e)}</p>")
         else:
-            cal_lines.append("일정 없음")
-        cal_lines.append("")  # 어제/오늘/내일 사이 빈 줄
-    while cal_lines and cal_lines[-1] == "":
-        cal_lines.pop()
-    write_article_page("05-calendar.html", "일정",
-                       text_block_to_pre("\n".join(cal_lines)), date_str, "일정")
+            cal_parts.append("<p>일정 없음</p>")
+    write_section_page("05-calendar.html", "일정",
+                       "\n".join(cal_parts), date_str)
 
-    # ── 6. 신문 ──
+    # ── 6. 주요 신문 기사 ──
     news = report.get("news", {}) or {}
     paper_names = {
         "hankyoreh": "한겨레",
@@ -600,7 +494,7 @@ def build_glasses_pages(report):
         "joongang":  "JTBC",
         "donga":     "동아일보",
     }
-    news_lines = []
+    news_parts = []
     seen = set()
     for key in ["hankyoreh", "chosun", "jtbc", "joongang", "donga"]:
         if key not in news:
@@ -610,29 +504,47 @@ def build_glasses_pages(report):
             continue
         seen.add(display)
         articles_list = news.get(key) or []
-        news_lines.append(f"[ {display} ]")
+        news_parts.append(f"<h2>{html_escape(display)}</h2>")
         if articles_list:
             for i, t in enumerate(articles_list, 1):
-                news_lines.append(f"{i}. {t}")
+                news_parts.append(f"<p>{i}. {html_escape(t)}</p>")
         else:
-            news_lines.append("정보 없음")
-        news_lines.append("")  # 신문사 사이 빈 줄
-    while news_lines and news_lines[-1] == "":
-        news_lines.pop()
-    write_article_page("06-news.html", "주요 신문 기사",
-                       text_block_to_pre("\n".join(news_lines)), date_str, "뉴스")
+            news_parts.append("<p>정보 없음</p>")
+    write_section_page("06-news.html", "주요 신문 기사",
+                       "\n".join(news_parts), date_str)
 
-    # ── 메인 목록 페이지 ──
-    articles = [
-        ("01-weather.html",         "오늘의 날씨",       "날씨"),
-        ("02-liturgy.html",         "오늘의 성무일도",   "기도"),
-        ("03-gospel.html",          "오늘의 복음",       "복음"),
-        ("04-gospel-tomorrow.html", "내일의 복음",       "복음"),
-        ("05-calendar.html",        "일정",              "일정"),
-        ("06-news.html",            "주요 신문 기사",    "뉴스"),
-    ]
-    write_glasses_index(report, articles)
-    print("glasses/ 폴더에 안경용 HTML 7개 생성 완료!")
+    # ── 안내용 인덱스 (사용자가 어떤 URL이 있는지 확인용) ──
+    index_html = f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>모닝 리포트 - 안경용 페이지 목록</title>
+<style>
+body {{ font-family: sans-serif; max-width: 700px; margin: 20px auto; padding: 0 20px; line-height: 1.7; }}
+li {{ margin: 0.5em 0; }}
+code {{ background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; }}
+</style>
+</head>
+<body>
+<h1>모닝 리포트 - 안경용 페이지 목록</h1>
+<p>{html_escape(date_str)}</p>
+<p>아래 6개 URL을 안경의 Web Reader 앱에 각각 따로 등록하세요.</p>
+<ol>
+<li><a href="01-weather.html">오늘의 날씨</a></li>
+<li><a href="02-liturgy.html">오늘의 성무일도</a></li>
+<li><a href="03-gospel.html">오늘의 복음</a></li>
+<li><a href="04-gospel-tomorrow.html">내일의 복음</a></li>
+<li><a href="05-calendar.html">일정</a></li>
+<li><a href="06-news.html">주요 신문 기사</a></li>
+</ol>
+</body>
+</html>
+"""
+    os.makedirs("glasses", exist_ok=True)
+    with open("glasses/index.html", "w", encoding="utf-8") as f:
+        f.write(index_html)
+
+    print("glasses/ 폴더에 안경(Web Reader)용 HTML 6개 + 안내 페이지 1개 생성 완료!")
 
 
 # ── 메인 ───────────────────────────────────────────────
@@ -664,7 +576,7 @@ def main():
 
     print("report.json 생성 완료!")
 
-    # 안경(Web Scope)용 HTML 생성
+    # 안경(Web Reader)용 HTML 생성
     try:
         build_glasses_pages(report)
     except Exception as e:
