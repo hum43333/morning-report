@@ -188,11 +188,13 @@
 
     <nav>
       <a class="menu-item" href="#" onclick="openDetail('weather'); return false;">1. 오늘의 날씨</a>
-      <a class="menu-item" href="#" onclick="openDetail('liturgy'); return false;">2. 오늘의 성무일도</a>
-      <a class="menu-item" href="#" onclick="openDetail('gospel'); return false;">3. 오늘의 복음</a>
-      <a class="menu-item" href="#" onclick="openDetail('gospel_tomorrow'); return false;">4. 내일의 복음</a>
-      <a class="menu-item" href="#" onclick="openDetail('calendar'); return false;">5. 일정</a>
-      <a class="menu-item" href="#" onclick="openDetail('news'); return false;">6. 주요 신문</a>
+      <a class="menu-item" href="#" onclick="openDetail('liturgy'); return false;">2. 성무일도 (아침)</a>
+      <a class="menu-item" href="#" onclick="openDetail('liturgy_evening'); return false;">3. 성무일도 (저녁)</a>
+      <a class="menu-item" href="#" onclick="openDetail('liturgy_night'); return false;">4. 성무일도 (끝기도)</a>
+      <a class="menu-item" href="#" onclick="openDetail('gospel'); return false;">5. 오늘의 복음</a>
+      <a class="menu-item" href="#" onclick="openDetail('gospel_tomorrow'); return false;">6. 내일의 복음</a>
+      <a class="menu-item" href="#" onclick="openDetail('calendar'); return false;">7. 일정</a>
+      <a class="menu-item" href="#" onclick="openDetail('news'); return false;">8. 주요 신문</a>
     </nav>
 
     <button class="refresh-btn" id="refresh-btn" onclick="manualRefresh()">[ 수동 갱신 ]</button>
@@ -222,7 +224,9 @@
 
     const TITLES = {
       weather:         '오늘의 날씨',
-      liturgy:         '오늘의 성무일도',
+      liturgy:         '성무일도 (아침기도)',
+      liturgy_evening: '성무일도 (저녁기도)',
+      liturgy_night:   '성무일도 (끝기도)',
       gospel:          '오늘의 복음',
       gospel_tomorrow: '내일의 복음',
       calendar:        '일정',
@@ -310,8 +314,11 @@
         ).join('');
       }
 
-      if (section === 'liturgy') {
-        const text = d.liturgy || '정보 없음';
+      if (section === 'liturgy' || section === 'liturgy_evening' || section === 'liturgy_night') {
+        let text;
+        if (section === 'liturgy')              text = d.liturgy_morning || d.liturgy || '정보 없음';
+        else if (section === 'liturgy_evening') text = d.liturgy_evening || '정보 없음';
+        else                                    text = d.liturgy_night || '정보 없음';
         return '<div class="pre">' + esc(text) + '</div>';
       }
 
