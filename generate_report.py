@@ -83,69 +83,106 @@ def get_weather():
 
 
 # ── 성무일도 ───────────────────────────────────────────
-def get_liturgy():
-    """catholic.or.kr 성무일도 아침기도 본문 추출."""
+# 성무일도 시간대별 stype 파라미터 (catholic.or.kr)
+#   mo = 아침기도, ev = 저녁기도, ni = 끝기도
+LITURGY_TYPES = {
+    "morning": {"stype": "mo", "label": "아침기도"},
+    "evening": {"stype": "ev", "label": "저녁기도"},
+    "night":   {"stype": "ni", "label": "끝기도"},
+}
+
+# 페이지 상단에 공통으로 나오는 시간대 메뉴(네비게이션) 단어들.
+_LITURGY_NAV_WORDS = [
+    "제1후 끝기도", "제2후 끝기도", "초대송", "독서기도", "아침기도",
+    "삼시경", "육시경", "구시경", "저녁기도", "끝기도", "낮기도",
+    "전날", "오늘", "다음날",
+]
+
+# 본문 끝을 알리는(=푸터/메뉴 시작) 키워드
+_LITURGY_FOOTER_WORDS = [
+    "이용약관", "ⓒ GoodNews", "ⓒGoodNews", "서울대교구", "goodnews@",
+    "매일미사", "가톨릭기도서", "7성사", "(구)성경쓰기", "미사/기도서",
+    "말씀나누기", "성경책갈피", "내 교구", "개인정보", "글자크기",
+    "가톨릭굿뉴스", "가톨릭정보",
+]
+
+# 줄 단위로 무조건 제외할 노이즈 키워드
+_LITURGY_NOISE_WORDS = [
+    "goodnews", "catholic.or.kr", "이용약관", "개인정보",
+    "ⓒ", "글자크기", "quick", "가톨릭굿뉴스",
+]
+
+
+def _fetch_liturgy_one(target_date, stype, label):
+    """성무일도 한 종류(아침/저녁/끝)의 본문을 추출."""
+    headers = {"User-Agent": "Mozilla/5.0"}
+    url = (
+        f"https://maria.catholic.or.kr/mi_pr/sungmu/sungmu.asp"
+        f"?menu=sungmu&sunseo=1&gomonth={target_date.strftime('%Y-%m-%d')}&stype={stype}"
+    )
+    r = requests.get(url, headers=headers, timeout=15)
+    r.encoding = "utf-8"
+    soup = BeautifulSoup(r.text, "html.parser")
+    full_text = soup.get_text(separator="\n")
+    lines = [l.strip() for l in full_text.splitlines()]
+
+    # ── 본문 시작점 찾기 ──
+    # 성무일도 본문은 거의 항상 "하느님, 날 구하소서"로 시작한다.
+    start_markers = ["날 구하소서", "저를 위로", "한 평화로운 밤"]
+    start_idx = None
+    for i, line in enumerate(lines):
+        if any(m in line for m in start_markers):
+            # 상단 메뉴 줄(네비게이션만 잔뜩 있는 줄)은 건너뜀
+            nav_hits = sum(1 for w in _LITURGY_NAV_WORDS if w in line)
+            if nav_hits >= 3:
+                continue
+            start_idx = i
+            break
+
+    # ── 시작점 못 찾으면 table fallback ──
+    if start_idx is None:
+        tables = soup.find_all("table")
+        fallback = []
+        for table in tables:
+            t = table.get_text(separator="\n")
+            if "하느님" in t or "찬미" in t or "시편" in t:
+                for line in t.splitlines():
+                    line = line.strip()
+                    if line and not any(bad in line for bad in _LITURGY_NOISE_WORDS):
+                        fallback.append(line)
+        if fallback:
+            return "\n".join(fallback)
+        return f"{label} 본문을 찾지 못했습니다."
+
+    # ── 본문 끝점 찾기 (푸터 키워드 첫 등장) ──
+    end_idx = len(lines)
+    for i in range(start_idx + 1, len(lines)):
+        if any(kw in lines[i] for kw in _LITURGY_FOOTER_WORDS):
+            end_idx = i
+            break
+
+    # ── 본문 줄 모으기 (노이즈 제거) ──
+    result = []
+    for line in lines[start_idx:end_idx]:
+        if line and not any(bad in line for bad in _LITURGY_NOISE_WORDS):
+            result.append(line)
+
+    return "\n".join(result) if result else f"{label} 본문을 찾지 못했습니다."
+
+
+def get_liturgy(kind="morning", target_date=None):
+    """성무일도 본문 추출.
+
+    kind: "morning"(아침기도) / "evening"(저녁기도) / "night"(끝기도)
+    target_date: 대상 날짜 (기본값 = 오늘)
+    """
+    if target_date is None:
+        target_date = today
+    cfg = LITURGY_TYPES.get(kind, LITURGY_TYPES["morning"])
     try:
-        date_str = today.strftime("%Y-%m-%d")
-        headers = {"User-Agent": "Mozilla/5.0"}
-        url = (
-            f"https://maria.catholic.or.kr/mi_pr/sungmu/sungmu.asp"
-            f"?menu=sungmu&sunseo=1&gomonth={date_str}&stype=mo"
-        )
-        r = requests.get(url, headers=headers, timeout=15)
-        r.encoding = "utf-8"
-        soup = BeautifulSoup(r.text, "html.parser")
-        full_text = soup.get_text(separator="\n")
-        lines = [l.strip() for l in full_text.splitlines()]
-
-        start_idx = None
-        for i, line in enumerate(lines):
-            if "날 구하소서" in line:
-                start_idx = i
-                break
-
-        if start_idx is None:
-            tables = soup.find_all("table")
-            fallback = []
-            for table in tables:
-                t = table.get_text(separator="\n")
-                if "하느님" in t or "찬미" in t or "시편" in t:
-                    for line in t.splitlines():
-                        line = line.strip()
-                        if line:
-                            fallback.append(line)
-            return "\n".join(fallback) if fallback else "아침기도 본문을 찾지 못했습니다."
-
-        found_pagen = False
-        end_idx = len(lines)
-        for i in range(start_idx + 1, len(lines)):
-            if "파견" in lines[i]:
-                found_pagen = True
-            if found_pagen and any(kw in lines[i] for kw in [
-                "이용약관", "ⓒ GoodNews", "서울대교구", "goodnews@",
-                "매일미사", "가톨릭기도서", "7성사",
-                "(구)성경쓰기", "미사/기도서", "말씀나누기", "성경책갈피", "내 교구"
-            ]):
-                end_idx = i
-                break
-            if not found_pagen and any(kw in lines[i] for kw in [
-                "이용약관", "ⓒ GoodNews", "서울대교구", "goodnews@",
-                "(구)성경쓰기", "미사/기도서"
-            ]):
-                end_idx = i
-                break
-
-        result = []
-        for line in lines[start_idx:end_idx]:
-            if line and not any(bad in line for bad in [
-                "goodnews", "catholic.or.kr", "이용약관",
-                "개인정보", "ⓒ", "글자크기", "quick"
-            ]):
-                result.append(line)
-
-        return "\n".join(result) if result else "아침기도 본문을 찾지 못했습니다."
+        return _fetch_liturgy_one(target_date, cfg["stype"], cfg["label"])
     except Exception as e:
-        return f"성무일도 오류: {e}"
+        return f"{cfg['label']} 오류: {e}"
 
 
 # ── 오늘의 복음 ────────────────────────────────────────
@@ -444,9 +481,18 @@ def build_glasses_pages(report):
         weather_body = "\n".join(parts)
     write_section_page("01-weather.html", "오늘의 날씨", weather_body, date_str)
 
-    # ── 2. 오늘의 성무일도 ──
-    liturgy_body = text_to_paragraphs_html(report.get("liturgy", ""))
-    write_section_page("02-liturgy.html", "오늘의 성무일도", liturgy_body, date_str)
+    # ── 2. 성무일도 (아침/저녁/끝 3종) ──
+    # 하위 호환: liturgy_morning 없으면 기존 liturgy 사용
+    lit_morning = report.get("liturgy_morning") or report.get("liturgy", "")
+    lit_evening = report.get("liturgy_evening", "")
+    lit_night   = report.get("liturgy_night", "")
+
+    write_section_page("02-liturgy.html", "오늘의 성무일도 (아침기도)",
+                       text_to_paragraphs_html(lit_morning), date_str)
+    write_section_page("02-liturgy-evening.html", "오늘의 성무일도 (저녁기도)",
+                       text_to_paragraphs_html(lit_evening), date_str)
+    write_section_page("02-liturgy-night.html", "오늘의 성무일도 (끝기도)",
+                       text_to_paragraphs_html(lit_night), date_str)
 
     # ── 3. 오늘의 복음 ──
     def gospel_to_html(g):
@@ -528,10 +574,12 @@ code {{ background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-size: 0.
 <body>
 <h1>모닝 리포트 - 안경용 페이지 목록</h1>
 <p>{html_escape(date_str)}</p>
-<p>아래 6개 URL을 안경의 Web Reader 앱에 각각 따로 등록하세요.</p>
+<p>아래 URL을 안경의 Web Reader 앱에 각각 따로 등록하세요.</p>
 <ol>
 <li><a href="01-weather.html">오늘의 날씨</a></li>
-<li><a href="02-liturgy.html">오늘의 성무일도</a></li>
+<li><a href="02-liturgy.html">오늘의 성무일도 (아침기도)</a></li>
+<li><a href="02-liturgy-evening.html">오늘의 성무일도 (저녁기도)</a></li>
+<li><a href="02-liturgy-night.html">오늘의 성무일도 (끝기도)</a></li>
 <li><a href="03-gospel.html">오늘의 복음</a></li>
 <li><a href="04-gospel-tomorrow.html">내일의 복음</a></li>
 <li><a href="05-calendar.html">일정</a></li>
@@ -551,11 +599,19 @@ code {{ background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-size: 0.
 def main():
     print("리포트 생성 시작...")
 
+    # 성무일도 3종 (아침/저녁/끝) — 한 번씩만 가져오기
+    liturgy_morning = get_liturgy("morning")
+    liturgy_evening = get_liturgy("evening")
+    liturgy_night   = get_liturgy("night")
+
     report = {
         "date":            today.strftime("%Y-%m-%d"),
         "generated_at":    now.strftime("%Y-%m-%d %H:%M"),
         "weather":         get_weather(),
-        "liturgy":         get_liturgy(),
+        "liturgy":         liturgy_morning,   # 하위 호환용 (기존 아침기도)
+        "liturgy_morning": liturgy_morning,
+        "liturgy_evening": liturgy_evening,
+        "liturgy_night":   liturgy_night,
         "gospel":          get_gospel(today),
         "gospel_tomorrow": get_gospel(tomorrow),
         "calendar": {
