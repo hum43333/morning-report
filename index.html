@@ -171,7 +171,6 @@
       <a href="#" onclick="openDetail('liturgy_night'); return false;">오늘의 성무일도 (끝기도)</a>
       <a href="#" onclick="openDetail('gospel'); return false;">오늘의 복음</a>
       <a href="#" onclick="openDetail('gospel_tomorrow'); return false;">내일의 복음</a>
-      <a href="#" onclick="openDetail('calendar'); return false;">일정</a>
       <a href="#" onclick="openDetail('news'); return false;">주요 신문 기사</a>
     </nav>
 
@@ -211,12 +210,10 @@
     };
 
     // report.json의 news 키 → 화면 표시 이름
-    // generate_report.py에서 키를 'joongang'으로 쓰든 'jtbc'로 쓰든 둘 다 대응
+    // report.json의 news 키 → 화면 표시 이름
     const PAPER_NAMES = {
       hankyoreh: '한겨레',
       chosun:    '조선일보',
-      jtbc:      'JTBC',
-      joongang:  'JTBC',
       donga:     '동아일보',
     };
 
@@ -335,8 +332,8 @@
 
       if (section === 'news') {
         const news = d.news || {};
-        // report.json에 있는 키 순서대로 표시 (joongang이든 jtbc든 모두 처리)
-        const keys = ['hankyoreh', 'chosun', 'jtbc', 'joongang', 'donga'];
+        // report.json에 있는 키 순서대로 표시
+        const keys = ['hankyoreh', 'chosun', 'donga'];
         // 실제 존재하는 키만, 중복 없이
         const seen = new Set();
         const validKeys = keys.filter(k => {
