@@ -193,8 +193,7 @@
       <a class="menu-item" href="#" onclick="openDetail('liturgy_night'); return false;">4. 성무일도 (끝기도)</a>
       <a class="menu-item" href="#" onclick="openDetail('gospel'); return false;">5. 오늘의 복음</a>
       <a class="menu-item" href="#" onclick="openDetail('gospel_tomorrow'); return false;">6. 내일의 복음</a>
-      <a class="menu-item" href="#" onclick="openDetail('calendar'); return false;">7. 일정</a>
-      <a class="menu-item" href="#" onclick="openDetail('news'); return false;">8. 주요 신문</a>
+      <a class="menu-item" href="#" onclick="openDetail('news'); return false;">7. 주요 신문</a>
     </nav>
 
     <button class="refresh-btn" id="refresh-btn" onclick="manualRefresh()">[ 수동 갱신 ]</button>
@@ -236,8 +235,6 @@
     const PAPER_NAMES = {
       hankyoreh: '한겨레',
       chosun:    '조선일보',
-      jtbc:      'JTBC',
-      joongang:  'JTBC',
       donga:     '동아일보',
     };
 
@@ -352,7 +349,7 @@
 
       if (section === 'news') {
         const news = d.news || {};
-        const keys = ['hankyoreh', 'chosun', 'jtbc', 'joongang', 'donga'];
+        const keys = ['hankyoreh', 'chosun', 'donga'];
         const seen = new Set();
         const validKeys = keys.filter(k => {
           if (news[k] !== undefined && !seen.has(PAPER_NAMES[k])) {
