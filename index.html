@@ -166,7 +166,9 @@
 
     <nav>
       <a href="#" onclick="openDetail('weather'); return false;">오늘의 날씨</a>
-      <a href="#" onclick="openDetail('liturgy'); return false;">오늘의 성무일도</a>
+      <a href="#" onclick="openDetail('liturgy'); return false;">오늘의 성무일도 (아침기도)</a>
+      <a href="#" onclick="openDetail('liturgy_evening'); return false;">오늘의 성무일도 (저녁기도)</a>
+      <a href="#" onclick="openDetail('liturgy_night'); return false;">오늘의 성무일도 (끝기도)</a>
       <a href="#" onclick="openDetail('gospel'); return false;">오늘의 복음</a>
       <a href="#" onclick="openDetail('gospel_tomorrow'); return false;">내일의 복음</a>
       <a href="#" onclick="openDetail('calendar'); return false;">일정</a>
@@ -199,7 +201,9 @@
 
     const TITLES = {
       weather:         '오늘의 날씨',
-      liturgy:         '오늘의 성무일도',
+      liturgy:         '오늘의 성무일도 (아침기도)',
+      liturgy_evening: '오늘의 성무일도 (저녁기도)',
+      liturgy_night:   '오늘의 성무일도 (끝기도)',
       gospel:          '오늘의 복음',
       gospel_tomorrow: '내일의 복음',
       calendar:        '일정',
@@ -275,10 +279,13 @@
         ).join('');
       }
 
-      if (section === 'liturgy') {
-        const text = d.liturgy || '정보 없음';
+      if (section === 'liturgy' || section === 'liturgy_evening' || section === 'liturgy_night') {
+        let text;
+        if (section === 'liturgy')              text = d.liturgy_morning || d.liturgy || '정보 없음';
+        else if (section === 'liturgy_evening') text = d.liturgy_evening || '정보 없음';
+        else                                    text = d.liturgy_night || '정보 없음';
         const lines = text.split('\n');
-        const HEADER_RE = /^(후렴|찬미가|시편|찬가|성경소구|응송|즈카르야|청원기도|주님의 기도|마침기도|파견|◎|○|＋)/;
+        const HEADER_RE = /^(후렴|찬미가|시편|찬가|성경소구|응송|즈카르야|청원기도|주님의 기도|마침기도|파견|양심성찰|독서|◎|○|＋)/;
         const blocks = [];
         let current = [];
         let currentIsHeader = false;
