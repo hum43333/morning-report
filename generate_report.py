@@ -362,7 +362,6 @@ def get_news(paper_key: str) -> list:
     rss_urls = {
         "hankyoreh": "https://www.hani.co.kr/rss/",
         "chosun":    "https://www.chosun.com/arc/outboundfeeds/rss/?outputType=xml",
-        "jtbc":      "https://fs.jtbc.co.kr/RSS/newsflash.xml",
         "donga":     "https://rss.donga.com/total.xml",
     }
     url = rss_urls.get(paper_key)
@@ -536,13 +535,11 @@ def build_glasses_pages(report):
     paper_names = {
         "hankyoreh": "한겨레",
         "chosun":    "조선일보",
-        "jtbc":      "JTBC",
-        "joongang":  "JTBC",
         "donga":     "동아일보",
     }
     news_parts = []
     seen = set()
-    for key in ["hankyoreh", "chosun", "jtbc", "joongang", "donga"]:
+    for key in ["hankyoreh", "chosun", "donga"]:
         if key not in news:
             continue
         display = paper_names.get(key, key)
@@ -582,7 +579,6 @@ code {{ background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-size: 0.
 <li><a href="02-liturgy-night.html">오늘의 성무일도 (끝기도)</a></li>
 <li><a href="03-gospel.html">오늘의 복음</a></li>
 <li><a href="04-gospel-tomorrow.html">내일의 복음</a></li>
-<li><a href="05-calendar.html">일정</a></li>
 <li><a href="06-news.html">주요 신문 기사</a></li>
 </ol>
 </body>
@@ -622,7 +618,6 @@ def main():
         "news": {
             "hankyoreh": get_news("hankyoreh"),
             "chosun":    get_news("chosun"),
-            "jtbc":      get_news("jtbc"),
             "donga":     get_news("donga"),
         }
     }
