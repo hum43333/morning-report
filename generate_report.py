@@ -171,18 +171,48 @@ def _fetch_liturgy_one(target_date, stype, label):
 
 
 def get_liturgy(kind="morning", target_date=None):
-    """성무일도 본문 추출.
+    """성무일도 본문 추출 (실패/짧은 결과 시 자동 재시도).
 
     kind: "morning"(아침기도) / "evening"(저녁기도) / "night"(끝기도)
     target_date: 대상 날짜 (기본값 = 오늘)
+
+    사이트가 일시적으로 빈 페이지나 짧은 응답을 줄 수 있어서,
+    결과가 200자 미만이면 잠시 기다렸다가 최대 3번까지 재시도한다.
     """
+    import time
     if target_date is None:
         target_date = today
     cfg = LITURGY_TYPES.get(kind, LITURGY_TYPES["morning"])
-    try:
-        return _fetch_liturgy_one(target_date, cfg["stype"], cfg["label"])
-    except Exception as e:
-        return f"{cfg['label']} 오류: {e}"
+
+    MIN_LENGTH = 200          # 이보다 짧으면 실패로 간주
+    MAX_TRIES  = 3            # 최대 시도 횟수
+    WAIT_SEC   = 5            # 재시도 전 대기 시간(초)
+
+    last_result = ""
+    last_error  = None
+    for attempt in range(1, MAX_TRIES + 1):
+        try:
+            result = _fetch_liturgy_one(target_date, cfg["stype"], cfg["label"])
+            last_result = result
+            # 본문이 충분히 길면 성공
+            if result and len(result) >= MIN_LENGTH and "찾지 못했습니다" not in result:
+                if attempt > 1:
+                    print(f"{cfg['label']}: {attempt}번째 시도에서 성공 ({len(result)}자)")
+                return result
+            # 짧으면 재시도
+            print(f"{cfg['label']}: {attempt}번째 시도 결과가 짧음 ({len(result)}자), "
+                  f"{WAIT_SEC}초 후 재시도")
+        except Exception as e:
+            last_error = e
+            print(f"{cfg['label']}: {attempt}번째 시도 예외 - {e}")
+        if attempt < MAX_TRIES:
+            time.sleep(WAIT_SEC)
+
+    # 모두 실패한 경우: 마지막 결과(짧더라도)를 반환, 아예 없으면 오류 메시지
+    if last_result:
+        print(f"{cfg['label']}: {MAX_TRIES}번 모두 짧음, 마지막 결과 사용")
+        return last_result
+    return f"{cfg['label']} 오류: {last_error}" if last_error else f"{cfg['label']} 본문을 찾지 못했습니다."
 
 
 # ── 오늘의 복음 ────────────────────────────────────────
@@ -628,10 +658,37 @@ def main():
     print("report.json 생성 완료!")
 
     # 안경(Web Reader)용 HTML 생성
+    # 오류가 나도 그냥 넘어가지 말고, 오류 내용을 파일로 남겨서 다음에 진단 가능하게.
     try:
         build_glasses_pages(report)
+        # 성공했으면 기존 오류 로그 파일 제거
+        if os.path.exists("glasses/_error.log"):
+            try:
+                os.remove("glasses/_error.log")
+            except Exception:
+                pass
     except Exception as e:
-        print(f"안경용 HTML 생성 오류: {e}")
+        import traceback
+        err_msg = (
+            f"안경용 HTML 생성 오류 발생\n"
+            f"시각: {now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"오류: {e}\n\n"
+            f"상세:\n{traceback.format_exc()}\n"
+        )
+        # 1) GitHub Actions 로그에 눈에 띄게 출력
+        print("=" * 60)
+        print("!!! 안경용 HTML 생성 실패 !!!")
+        print(err_msg)
+        print("=" * 60)
+        # 2) glasses/_error.log 파일로 남겨서 나중에 확인 가능
+        # (Python이 정상 종료해야 daily.yml의 git push가 이어서 실행되고,
+        #  이 로그 파일이 GitHub에 올라가 사용자가 확인할 수 있다)
+        try:
+            os.makedirs("glasses", exist_ok=True)
+            with open("glasses/_error.log", "w", encoding="utf-8") as f:
+                f.write(err_msg)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
