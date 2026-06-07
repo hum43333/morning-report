@@ -91,30 +91,25 @@ LITURGY_TYPES = {
     "night":   {"stype": "ni", "label": "끝기도"},
 }
 
-# 페이지 상단에 공통으로 나오는 시간대 메뉴(네비게이션) 단어들.
-_LITURGY_NAV_WORDS = [
-    "제1후 끝기도", "제2후 끝기도", "초대송", "독서기도", "아침기도",
-    "삼시경", "육시경", "구시경", "저녁기도", "끝기도", "낮기도",
-    "전날", "오늘", "다음날",
-]
-
-# 본문 끝을 알리는(=푸터/메뉴 시작) 키워드
-_LITURGY_FOOTER_WORDS = [
-    "이용약관", "ⓒ GoodNews", "ⓒGoodNews", "서울대교구", "goodnews@",
-    "매일미사", "가톨릭기도서", "7성사", "(구)성경쓰기", "미사/기도서",
-    "말씀나누기", "성경책갈피", "내 교구", "개인정보", "글자크기",
-    "가톨릭굿뉴스", "가톨릭정보",
-]
-
-# 줄 단위로 무조건 제외할 노이즈 키워드
-_LITURGY_NOISE_WORDS = [
-    "goodnews", "catholic.or.kr", "이용약관", "개인정보",
-    "ⓒ", "글자크기", "quick", "가톨릭굿뉴스",
-]
+# 각 stype이 만들어내는 페이지에서 "본문 테이블"의 첫 셀(헤더)에 들어 있는 이름.
+# 평소: "아침기도" / "저녁기도" / "끝기도"
+# 주일·대축일 전날(토요일 등): "제1저녁기도" / "제1저녁기도후 끝기도" 등 변형이 나옴.
+# 본문 테이블을 식별할 때 이 후보들 중 하나가 첫 셀에 포함되는지 확인한다.
+_LITURGY_TABLE_HEADERS = {
+    "mo":  ["아침기도"],
+    "ev":  ["저녁기도", "제1저녁기도", "제2저녁기도"],
+    "ni":  ["끝기도", "제1저녁기도후 끝기도", "제2저녁기도후 끝기도"],
+}
 
 
 def _fetch_liturgy_one(target_date, stype, label):
-    """성무일도 한 종류(아침/저녁/끝)의 본문을 추출."""
+    """성무일도 한 종류(아침/저녁/끝)의 본문을 추출 (테이블 구조 기반).
+
+    catholic.or.kr 페이지는 각 기도 시간을 별도의 <table>로 담아 보낸다.
+    표의 첫 셀에 기도 이름(예: "아침기도", "제1저녁기도")이 들어 있고,
+    나머지 셀에 기도문 본문이 단락별로 들어 있다.
+    이 함수는 첫 셀이 기도 이름과 일치하는 표를 찾아 셀별로 텍스트를 모은다.
+    """
     headers = {"User-Agent": "Mozilla/5.0"}
     url = (
         f"https://maria.catholic.or.kr/mi_pr/sungmu/sungmu.asp"
@@ -123,51 +118,58 @@ def _fetch_liturgy_one(target_date, stype, label):
     r = requests.get(url, headers=headers, timeout=15)
     r.encoding = "utf-8"
     soup = BeautifulSoup(r.text, "html.parser")
-    full_text = soup.get_text(separator="\n")
-    lines = [l.strip() for l in full_text.splitlines()]
 
-    # ── 본문 시작점 찾기 ──
-    # 성무일도 본문은 거의 항상 "하느님, 날 구하소서"로 시작한다.
-    start_markers = ["날 구하소서", "저를 위로", "한 평화로운 밤"]
-    start_idx = None
-    for i, line in enumerate(lines):
-        if any(m in line for m in start_markers):
-            # 상단 메뉴 줄(네비게이션만 잔뜩 있는 줄)은 건너뜀
-            nav_hits = sum(1 for w in _LITURGY_NAV_WORDS if w in line)
-            if nav_hits >= 3:
-                continue
-            start_idx = i
+    expected = _LITURGY_TABLE_HEADERS.get(stype, [label])
+
+    # ── 1단계: 본문 테이블 찾기 ──
+    # 첫 셀 텍스트가 기도 이름과 정확히 일치(또는 그 단어로 시작)하는 표를 찾는다.
+    target = None
+    for table in soup.find_all("table"):
+        first_cell = table.find(["td", "th"])
+        if not first_cell:
+            continue
+        first_text = first_cell.get_text(strip=True)
+        if any(first_text == name or first_text.startswith(name) for name in expected):
+            target = table
             break
 
-    # ── 시작점 못 찾으면 table fallback ──
-    if start_idx is None:
-        tables = soup.find_all("table")
-        fallback = []
-        for table in tables:
-            t = table.get_text(separator="\n")
-            if "하느님" in t or "찬미" in t or "시편" in t:
-                for line in t.splitlines():
-                    line = line.strip()
-                    if line and not any(bad in line for bad in _LITURGY_NOISE_WORDS):
-                        fallback.append(line)
-        if fallback:
-            return "\n".join(fallback)
-        return f"{label} 본문을 찾지 못했습니다."
+    # 2단계(백업): 1단계에서 못 찾으면, 표 내용 앞부분에 기도 이름이 포함되어 있는지로 추정
+    if target is None:
+        for table in soup.find_all("table"):
+            head = table.get_text(strip=True)[:80]  # 첫 80자만 검사
+            if any(name in head for name in expected):
+                target = table
+                break
 
-    # ── 본문 끝점 찾기 (푸터 키워드 첫 등장) ──
-    end_idx = len(lines)
-    for i in range(start_idx + 1, len(lines)):
-        if any(kw in lines[i] for kw in _LITURGY_FOOTER_WORDS):
-            end_idx = i
-            break
+    if target is None:
+        return f"{label} 본문을 찾지 못했습니다. (테이블 없음)"
 
-    # ── 본문 줄 모으기 (노이즈 제거) ──
-    result = []
-    for line in lines[start_idx:end_idx]:
-        if line and not any(bad in line for bad in _LITURGY_NOISE_WORDS):
-            result.append(line)
+    # ── 표에서 셀별로 텍스트 추출 ──
+    # 직접 자식 <tr>만 가져와서 중첩 테이블의 영향을 최소화한다.
+    rows = target.find_all("tr", recursive=False)
+    if not rows:
+        tbody = target.find("tbody", recursive=False)
+        if tbody:
+            rows = tbody.find_all("tr", recursive=False)
+    if not rows:
+        rows = target.find_all("tr")  # 최후의 수단
 
-    return "\n".join(result) if result else f"{label} 본문을 찾지 못했습니다."
+    blocks = []
+    for row in rows:
+        cells = row.find_all(["td", "th"], recursive=False)
+        if not cells:
+            cells = row.find_all(["td", "th"])
+        for cell in cells:
+            text = cell.get_text(separator="\n", strip=True)
+            # 셀 안에서 빈 줄 제거, 양옆 공백 정리
+            text_lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+            if text_lines:
+                blocks.append("\n".join(text_lines))
+
+    if not blocks:
+        return f"{label} 본문이 비어 있습니다."
+
+    return "\n\n".join(blocks)
 
 
 def get_liturgy(kind="morning", target_date=None):
