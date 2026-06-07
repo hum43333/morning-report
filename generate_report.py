@@ -121,23 +121,30 @@ def _fetch_liturgy_one(target_date, stype, label):
 
     expected = _LITURGY_TABLE_HEADERS.get(stype, [label])
 
+    # 공백을 모두 제거해서 비교 (catholic.or.kr이 "아침 기도"처럼 사이에 공백을
+    # 넣는 경우가 있어서 "아침기도"와 매칭 안 되는 문제 해결)
+    def _norm(s):
+        return "".join(s.split())  # 모든 종류의 공백(스페이스, 탭, 줄바꿈) 제거
+
+    expected_norm = [_norm(name) for name in expected]
+
     # ── 1단계: 본문 테이블 찾기 ──
-    # 첫 셀 텍스트가 기도 이름과 정확히 일치(또는 그 단어로 시작)하는 표를 찾는다.
+    # 첫 셀 텍스트(공백 제거)가 기도 이름과 정확히 일치(또는 그 단어로 시작)하는 표를 찾는다.
     target = None
     for table in soup.find_all("table"):
         first_cell = table.find(["td", "th"])
         if not first_cell:
             continue
-        first_text = first_cell.get_text(strip=True)
-        if any(first_text == name or first_text.startswith(name) for name in expected):
+        first_text_norm = _norm(first_cell.get_text(strip=True))
+        if any(first_text_norm == n or first_text_norm.startswith(n) for n in expected_norm):
             target = table
             break
 
     # 2단계(백업): 1단계에서 못 찾으면, 표 내용 앞부분에 기도 이름이 포함되어 있는지로 추정
     if target is None:
         for table in soup.find_all("table"):
-            head = table.get_text(strip=True)[:80]  # 첫 80자만 검사
-            if any(name in head for name in expected):
+            head_norm = _norm(table.get_text(strip=True)[:120])  # 첫 120자(공백 제거 전 기준)
+            if any(n in head_norm for n in expected_norm):
                 target = table
                 break
 
