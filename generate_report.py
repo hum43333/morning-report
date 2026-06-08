@@ -91,24 +91,47 @@ LITURGY_TYPES = {
     "night":   {"stype": "ni", "label": "끝기도"},
 }
 
-# 각 stype이 만들어내는 페이지에서 "본문 테이블"의 첫 셀(헤더)에 들어 있는 이름.
-# 평소: "아침기도" / "저녁기도" / "끝기도"
-# 주일·대축일 전날(토요일 등): "제1저녁기도" / "제1저녁기도후 끝기도" 등 변형이 나옴.
-# 본문 테이블을 식별할 때 이 후보들 중 하나가 첫 셀에 포함되는지 확인한다.
+# 각 stype의 본문 헤더에 나타나는 이름 후보들.
+# 사이트가 표기를 일관되게 하지 않음:
+#   - "아침 기도" (사이에 공백) vs "저녁기도", "끝기도" (붙임)
+#   - 주일·대축일 전날: "제1저녁기도", "제1저녁기도후 끝기도" 등 변형
+# 매칭은 공백을 모두 제거한 뒤 비교하므로, 공백 있는 변형은 따로 안 적어도 됨.
 _LITURGY_TABLE_HEADERS = {
     "mo":  ["아침기도"],
     "ev":  ["저녁기도", "제1저녁기도", "제2저녁기도"],
-    "ni":  ["끝기도", "제1저녁기도후 끝기도", "제2저녁기도후 끝기도"],
+    "ni":  ["끝기도", "제1저녁기도후끝기도", "제2저녁기도후끝기도"],
 }
+
+# 성무일도 페이지에 등장할 수 있는 모든 기도 시간 이름 (본문 끝 감지용).
+# 본문 추출 중 다른 시간대 이름이 나오면 거기서 끊는다.
+_ALL_LITURGY_SECTIONS = [
+    "초대송", "독서기도", "아침기도", "삼시경", "낮기도",
+    "육시경", "구시경", "저녁기도", "끝기도",
+    "제1저녁기도", "제2저녁기도",
+    "제1저녁기도후끝기도", "제2저녁기도후끝기도",
+]
+
+# 본문 끝(=푸터 시작)을 알리는 키워드
+_LITURGY_FOOTER_MARKERS = [
+    "이용약관", "개인정보취급방침", "ⓒ GoodNews", "ⓒGoodNews",
+    "goodnews@", "(구)성경쓰기", "미사/기도서", "글자크기",
+    "내 교구", "전체메뉴", "성무일도 ⓒ", "한국천주교중앙협의회",
+    "GTM-", "googletagmanager",
+]
 
 
 def _fetch_liturgy_one(target_date, stype, label):
-    """성무일도 한 종류(아침/저녁/끝)의 본문을 추출 (테이블 구조 기반).
+    """성무일도 한 종류(아침/저녁/끝)의 본문을 추출 (텍스트 기반).
 
-    catholic.or.kr 페이지는 각 기도 시간을 별도의 <table>로 담아 보낸다.
-    표의 첫 셀에 기도 이름(예: "아침기도", "제1저녁기도")이 들어 있고,
-    나머지 셀에 기도문 본문이 단락별로 들어 있다.
-    이 함수는 첫 셀이 기도 이름과 일치하는 표를 찾아 셀별로 텍스트를 모은다.
+    HTML 구조(<table>/<ul>/<dl>)에 의존하지 않고 페이지 전체 텍스트를 분석한다.
+
+    전략:
+    1) 페이지에서 기도 이름이 나오는 모든 줄을 찾는다 (네비게이션 + 실제 헤더 모두).
+    2) 각 위치 뒤에 따라오는 본문 길이를 잰다.
+    3) 본문이 가장 긴 위치를 진짜 헤더로 선택 (네비게이션 뒤에는 본문이 거의 없음).
+    4) 본문 끝은 "다른 기도 시간 이름이 나오는 줄" 또는 "푸터 키워드"에서 끊는다.
+
+    공백 정규화로 "아침 기도" vs "아침기도" 같은 표기 차이를 모두 처리한다.
     """
     headers = {"User-Agent": "Mozilla/5.0"}
     url = (
@@ -119,64 +142,87 @@ def _fetch_liturgy_one(target_date, stype, label):
     r.encoding = "utf-8"
     soup = BeautifulSoup(r.text, "html.parser")
 
-    expected = _LITURGY_TABLE_HEADERS.get(stype, [label])
-
-    # 공백을 모두 제거해서 비교 (catholic.or.kr이 "아침 기도"처럼 사이에 공백을
-    # 넣는 경우가 있어서 "아침기도"와 매칭 안 되는 문제 해결)
+    # 공백을 모두 제거하는 정규화 함수
     def _norm(s):
-        return "".join(s.split())  # 모든 종류의 공백(스페이스, 탭, 줄바꿈) 제거
+        return "".join(s.split())
 
-    expected_norm = [_norm(name) for name in expected]
+    expected_norm = [_norm(n) for n in _LITURGY_TABLE_HEADERS.get(stype, [label])]
+    all_sections_norm = [_norm(n) for n in _ALL_LITURGY_SECTIONS]
 
-    # ── 1단계: 본문 테이블 찾기 ──
-    # 첫 셀 텍스트(공백 제거)가 기도 이름과 정확히 일치(또는 그 단어로 시작)하는 표를 찾는다.
-    target = None
-    for table in soup.find_all("table"):
-        first_cell = table.find(["td", "th"])
-        if not first_cell:
+    # 페이지 전체 텍스트를 줄 단위로 분리
+    full_text = soup.get_text(separator="\n")
+    lines = [ln.strip() for ln in full_text.splitlines()]
+
+    # ── 기도 이름이 나오는 모든 줄 찾기 ──
+    candidate_starts = []
+    for i, line in enumerate(lines):
+        if not line:
             continue
-        first_text_norm = _norm(first_cell.get_text(strip=True))
-        if any(first_text_norm == n or first_text_norm.startswith(n) for n in expected_norm):
-            target = table
-            break
+        if _norm(line) in expected_norm:
+            candidate_starts.append(i)
 
-    # 2단계(백업): 1단계에서 못 찾으면, 표 내용 앞부분에 기도 이름이 포함되어 있는지로 추정
-    if target is None:
-        for table in soup.find_all("table"):
-            head_norm = _norm(table.get_text(strip=True)[:120])  # 첫 120자(공백 제거 전 기준)
-            if any(n in head_norm for n in expected_norm):
-                target = table
+    if not candidate_starts:
+        return f"{label} 본문을 찾지 못했습니다. (헤더 미발견)"
+
+    # ── 네비게이션 메뉴 안의 후보 필터링 ──
+    # 페이지 상단의 네비게이션은 "초대송, 독서기도, 아침기도, ..., 끝기도" 식으로
+    # 기도 이름이 연달아 나옴. 어떤 후보의 바로 다음 비어있지 않은 줄이
+    # 또 다른 기도 시간 이름이면 그 후보는 네비게이션 안이라고 본다.
+    def _is_in_navigation(idx):
+        for j in range(idx + 1, len(lines)):
+            if not lines[j]:
+                continue
+            return _norm(lines[j]) in all_sections_norm
+        return False
+
+    non_nav_candidates = [c for c in candidate_starts if not _is_in_navigation(c)]
+    # 본문 후보가 하나라도 있으면 그것만 사용. 다 네비게이션처럼 보이면 원래 목록 사용
+    if non_nav_candidates:
+        candidate_starts = non_nav_candidates
+
+    # ── 각 후보에서 본문 끝까지의 길이 측정, 가장 긴 본문을 가진 후보를 선택 ──
+    best_start = None
+    best_end = None
+    best_content_size = 0
+
+    for cand in candidate_starts:
+        content_start = cand + 1
+        content_end = len(lines)
+
+        for j in range(content_start, len(lines)):
+            line = lines[j]
+            if not line:
+                continue
+            line_norm = _norm(line)
+            # 다른 기도 시간 이름이 나오면 끝
+            if line_norm in all_sections_norm and line_norm not in expected_norm:
+                content_end = j
+                break
+            # 푸터 키워드가 나오면 끝
+            if any(m in line for m in _LITURGY_FOOTER_MARKERS):
+                content_end = j
                 break
 
-    if target is None:
-        return f"{label} 본문을 찾지 못했습니다. (테이블 없음)"
+        # 본문 크기 (의미 있는 줄의 글자수 합)
+        size = sum(len(lines[k]) for k in range(content_start, content_end) if lines[k])
 
-    # ── 표에서 셀별로 텍스트 추출 ──
-    # 직접 자식 <tr>만 가져와서 중첩 테이블의 영향을 최소화한다.
-    rows = target.find_all("tr", recursive=False)
-    if not rows:
-        tbody = target.find("tbody", recursive=False)
-        if tbody:
-            rows = tbody.find_all("tr", recursive=False)
-    if not rows:
-        rows = target.find_all("tr")  # 최후의 수단
+        if size > best_content_size:
+            best_content_size = size
+            best_start = content_start
+            best_end = content_end
 
-    blocks = []
-    for row in rows:
-        cells = row.find_all(["td", "th"], recursive=False)
-        if not cells:
-            cells = row.find_all(["td", "th"])
-        for cell in cells:
-            text = cell.get_text(separator="\n", strip=True)
-            # 셀 안에서 빈 줄 제거, 양옆 공백 정리
-            text_lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-            if text_lines:
-                blocks.append("\n".join(text_lines))
+    # 너무 짧으면 (네비게이션 부분만 잡힌 것으로 추정) 실패
+    if best_start is None or best_content_size < 100:
+        return f"{label} 본문을 찾지 못했습니다. (본문 너무 짧음: {best_content_size}자)"
 
-    if not blocks:
+    # 결과에 헤더(기도 이름 줄)도 포함 — 사용자가 어떤 기도인지 알 수 있게
+    header_line_idx = best_start - 1
+    result_lines = [lines[header_line_idx]] + [ln for ln in lines[best_start:best_end] if ln]
+
+    if not result_lines:
         return f"{label} 본문이 비어 있습니다."
 
-    return "\n\n".join(blocks)
+    return "\n".join(result_lines)
 
 
 def get_liturgy(kind="morning", target_date=None):
