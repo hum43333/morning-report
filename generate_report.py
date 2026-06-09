@@ -23,15 +23,6 @@ tomorrow  = today + datetime.timedelta(days=1)
 
 WEATHER_API_KEY = os.environ.get("WEATHER_API_KEY", "")
 
-# ── 안경(Glance) 캐시 우회용 설정 ──
-# Glance(Web Reader)는 URL 기준으로 본문을 캐시함 (사실상 영구).
-# 안경에 등록된 URL(예: 02-liturgy.html)은 그대로 두되, 그 페이지는
-# 매일 다른 본문 URL(예: 02-liturgy-2026-06-09.html)로의 링크만 갖게 만든다.
-# 본문 URL이 매일 달라지므로 Glance가 매일 새 본문을 받아오게 됨.
-GLASSES_BASE_URL = "https://hum43333.github.io/morning-report/glasses/"
-# 날짜별 본문 파일을 며칠치 보관할지 (이보다 오래된 파일은 자동 삭제)
-GLASSES_RETENTION_DAYS = 7
-
 ICAL_URLS = [
     "https://p33-caldav.icloud.com/published/2/MTAwMzk4NDcwNTEwMDM5OIKMqbxDECSm4-w6pcPcOCIVP58eGmQm8cjZa9KDDBF9vv8SoApAB7gMPuYjpGnH98fB8YWpMvUQeizQXhsRZYU",
     "https://p33-caldav.icloud.com/published/2/MTAwMzk4NDcwNTEwMDM5OIKMqbxDECSm4-w6pcPcOCJrKUsO_AW5w6v0v7oNHYHd5WsV_bMsDk3ACrtnjpxRLabjLsx6CvWdC053Tr3Ss-g",
@@ -563,132 +554,15 @@ p {{ margin: 0.8em 0; }}
     return actual_size
 
 
-def write_glance_index_page(filename, title, body_filename, date_str, generated_at=None):
-    """안경(Glance) 캐시 우회용 인덱스 페이지 작성.
-
-    안경에 등록된 URL(예: 02-liturgy.html)이 이 페이지가 됨.
-    페이지 안에는 오늘 날짜의 본문 페이지로 향하는 링크 1개만 포함.
-    Glance가 이 페이지를 source로 fetch해서 article 링크 1개를 추출하고,
-    사용자가 그 링크를 탭하면 매일 다른 본문 URL을 fetch → 캐시 우회됨.
-
-    링크는 절대 URL로 작성하여 r.jina.ai가 article로 잘 인식하도록 함.
-    """
-    gen_at = generated_at or ""
-    body_url = GLASSES_BASE_URL + body_filename
-    link_text = f"{date_str} {title} 본문 보기"
-
-    html = f"""<!DOCTYPE html>
-<html lang="ko">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{html_escape(title)} ({html_escape(date_str)})</title>
-<meta name="description" content="{html_escape(title)} - {html_escape(date_str)}">
-<style>
-body {{ font-family: sans-serif; max-width: 700px; margin: 20px auto; padding: 0 20px; line-height: 1.7; color: #222; }}
-h1 {{ font-size: 1.6em; border-bottom: 2px solid #333; padding-bottom: 0.3em; }}
-.meta {{ color: #888; font-size: 0.9em; margin-bottom: 1.5em; }}
-.genat {{ color: #aaa; font-size: 0.8em; margin-top: 2em; border-top: 1px solid #ddd; padding-top: 0.5em; }}
-ul {{ list-style: none; padding: 0; }}
-li {{ margin: 1em 0; }}
-li a {{ font-size: 1.2em; color: #0a58ca; text-decoration: none;
-        display: block; padding: 0.8em; border: 1px solid #ddd;
-        border-radius: 4px; }}
-li a:hover {{ background: #f5f5f5; }}
-</style>
-</head>
-<body>
-<article>
-<h1>{html_escape(title)}</h1>
-<p class="meta">{html_escape(date_str)}</p>
-<ul>
-<li><a href="{html_escape(body_url)}">{html_escape(link_text)}</a></li>
-</ul>
-<p class="genat">생성 시각: {html_escape(gen_at)}</p>
-</article>
-</body>
-</html>
-"""
-    os.makedirs("glasses", exist_ok=True)
-    path = f"glasses/{filename}"
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(html)
-    actual_size = os.path.getsize(path)
-    print(f"  [인덱스] {path}: {actual_size}바이트 → {body_filename}")
-    return actual_size
-
-
-def cleanup_old_glasses_body_files(today_str, retention_days=GLASSES_RETENTION_DAYS):
-    """안경 폴더에서 오래된 날짜별 본문 파일을 자동 삭제.
-
-    파일명 패턴: {prefix}-YYYY-MM-DD.html (예: 02-liturgy-2026-06-09.html)
-    today_str은 'YYYY-MM-DD' 형식. retention_days만큼 보존 후 나머지 삭제.
-    날짜가 없는 파일(예: 02-liturgy.html, index.html, _error.log)은 건드리지 않음.
-    """
-    import re
-
-    if not os.path.isdir("glasses"):
-        return
-
-    try:
-        today_dt = datetime.datetime.strptime(today_str, "%Y-%m-%d").date()
-    except ValueError:
-        print(f"  [정리] today_str '{today_str}' 파싱 실패, 정리 건너뜀")
-        return
-
-    cutoff = today_dt - datetime.timedelta(days=retention_days)
-    pattern = re.compile(r"-(\d{4}-\d{2}-\d{2})\.html$")
-
-    removed = 0
-    kept_dated = 0
-    for fn in os.listdir("glasses"):
-        m = pattern.search(fn)
-        if not m:
-            continue  # 날짜 없는 파일은 건너뜀
-        try:
-            file_dt = datetime.datetime.strptime(m.group(1), "%Y-%m-%d").date()
-        except ValueError:
-            continue
-        if file_dt < cutoff:
-            try:
-                os.remove(f"glasses/{fn}")
-                removed += 1
-                print(f"  [정리] 삭제: glasses/{fn} (날짜 {file_dt}, {(today_dt-file_dt).days}일 전)")
-            except Exception as e:
-                print(f"  [정리] 삭제 실패 {fn}: {e}")
-        else:
-            kept_dated += 1
-
-    print(f"  [정리] 보존 {kept_dated}개, 삭제 {removed}개 (보존 기간: 최근 {retention_days}일)")
-
-
 def build_glasses_pages(report):
     """report 딕셔너리로부터 안경(Glance/Web Reader)용 HTML을 만든다.
 
-    안경(Glance)의 30일 본문 캐시를 우회하기 위해 각 페이지를 두 단계 구조로 만든다:
-      1) 인덱스 페이지: 안경에 등록된 고정 URL (예: 02-liturgy.html)
-         → 오늘 날짜의 본문 페이지로 향하는 링크 1개만 포함
-      2) 본문 페이지: 매일 다른 URL (예: 02-liturgy-2026-06-09.html)
-         → 실제 콘텐츠. URL이 매일 바뀌므로 Glance가 매일 새로 fetch함
+    각 파일은 안경에 따로 등록할 수 있는 독립 페이지.
+    안경에 등록된 URL이 곧 본문을 직접 표시하는 페이지.
     """
     date_str = report["date"]      # 예: "2026-06-09"
     gen_at = report.get("generated_at", "")
     print(f"[안경 페이지] 생성 시작: date={date_str}, generated_at={gen_at}")
-
-    # ── 0. 오래된 본문 파일 정리 (최근 N일치만 보존) ──
-    cleanup_old_glasses_body_files(date_str)
-
-    # 각 섹션 만드는 헬퍼: 인덱스(고정 URL) + 본문(날짜 포함 URL)
-    def make_pair(index_filename, title, body_html):
-        """index_filename은 안경에 등록된 고정 URL (예: '02-liturgy.html').
-        date_str을 끼워 넣어 body 파일명을 만들고, 두 파일을 모두 작성한다."""
-        # 본문 파일명: 02-liturgy.html → 02-liturgy-2026-06-09.html
-        base = index_filename.rsplit(".", 1)[0]  # "02-liturgy"
-        body_filename = f"{base}-{date_str}.html"  # "02-liturgy-2026-06-09.html"
-        # 본문 파일 작성
-        write_section_page(body_filename, title, body_html, date_str, gen_at)
-        # 인덱스 파일 작성 (본문으로 안내하는 한 줄짜리 페이지)
-        write_glance_index_page(index_filename, title, body_filename, date_str, gen_at)
 
     # ── 1. 오늘의 날씨 ──
     w = report.get("weather", {})
@@ -701,7 +575,7 @@ def build_glasses_pages(report):
             parts.append(f"<h2>{html_escape(label)}</h2>")
             parts.append(f"<p>{html_escape(val)}</p>")
         weather_body = "\n".join(parts)
-    make_pair("01-weather.html", "오늘의 날씨", weather_body)
+    write_section_page("01-weather.html", "오늘의 날씨", weather_body, date_str, gen_at)
 
     # ── 2. 성무일도 (아침/저녁/끝 3종) ──
     # 하위 호환: liturgy_morning 없으면 기존 liturgy 사용
@@ -713,12 +587,12 @@ def build_glasses_pages(report):
     print(f"[안경 페이지] 성무일도 본문 길이 — 아침: {len(lit_morning)}자, "
           f"저녁: {len(lit_evening)}자, 끝기도: {len(lit_night)}자")
 
-    make_pair("02-liturgy.html", "오늘의 성무일도 (아침기도)",
-              text_to_paragraphs_html(lit_morning))
-    make_pair("02-liturgy-evening.html", "오늘의 성무일도 (저녁기도)",
-              text_to_paragraphs_html(lit_evening))
-    make_pair("02-liturgy-night.html", "오늘의 성무일도 (끝기도)",
-              text_to_paragraphs_html(lit_night))
+    write_section_page("02-liturgy.html", "오늘의 성무일도 (아침기도)",
+                       text_to_paragraphs_html(lit_morning), date_str, gen_at)
+    write_section_page("02-liturgy-evening.html", "오늘의 성무일도 (저녁기도)",
+                       text_to_paragraphs_html(lit_evening), date_str, gen_at)
+    write_section_page("02-liturgy-night.html", "오늘의 성무일도 (끝기도)",
+                       text_to_paragraphs_html(lit_night), date_str, gen_at)
 
     # ── 3. 오늘의 복음 ──
     def gospel_to_html(g):
@@ -736,12 +610,12 @@ def build_glasses_pages(report):
             parts.append(text_to_paragraphs_html(g["gospel"]))
         return "\n".join(parts) if parts else "<p>정보 없음</p>"
 
-    make_pair("03-gospel.html", "오늘의 복음",
-              gospel_to_html(report.get("gospel")))
+    write_section_page("03-gospel.html", "오늘의 복음",
+                       gospel_to_html(report.get("gospel")), date_str, gen_at)
 
     # ── 4. 내일의 복음 ──
-    make_pair("04-gospel-tomorrow.html", "내일의 복음",
-              gospel_to_html(report.get("gospel_tomorrow")))
+    write_section_page("04-gospel-tomorrow.html", "내일의 복음",
+                       gospel_to_html(report.get("gospel_tomorrow")), date_str, gen_at)
 
     # ── 5. 일정 ── (안경 메뉴에서는 사용 안 함. 코드는 보존만)
     cal = report.get("calendar", {}) or {}
@@ -754,7 +628,8 @@ def build_glasses_pages(report):
                 cal_parts.append(f"<p>{html_escape(e)}</p>")
         else:
             cal_parts.append("<p>일정 없음</p>")
-    make_pair("05-calendar.html", "일정", "\n".join(cal_parts))
+    write_section_page("05-calendar.html", "일정",
+                       "\n".join(cal_parts), date_str, gen_at)
 
     # ── 6. 주요 신문 기사 ──
     news = report.get("news", {}) or {}
@@ -779,7 +654,8 @@ def build_glasses_pages(report):
                 news_parts.append(f"<p>{i}. {html_escape(t)}</p>")
         else:
             news_parts.append("<p>정보 없음</p>")
-    make_pair("06-news.html", "주요 신문 기사", "\n".join(news_parts))
+    write_section_page("06-news.html", "주요 신문 기사",
+                       "\n".join(news_parts), date_str, gen_at)
 
     # ── 안내용 인덱스 (사용자가 어떤 URL이 있는지 확인용) ──
     index_html = f"""<!DOCTYPE html>
@@ -815,43 +691,19 @@ code {{ background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-size: 0.
 
     # ── 최종 검증: 모든 파일이 잘 만들어졌고 크기가 충분한지 확인 ──
     print("[안경 페이지] 최종 파일 검증 시작...")
-    # 안경에 등록된 고정 인덱스 URL들 (이게 있어야 안경이 본문으로 안내됨)
-    expected_index_files = [
+    expected_files = [
         "01-weather.html", "02-liturgy.html", "02-liturgy-evening.html",
         "02-liturgy-night.html", "03-gospel.html", "04-gospel-tomorrow.html",
         "05-calendar.html", "06-news.html", "index.html",
     ]
-    # 오늘 날짜의 본문 파일들 (매일 다른 URL이라 캐시 우회됨)
-    expected_body_files = [
-        f"01-weather-{date_str}.html",
-        f"02-liturgy-{date_str}.html",
-        f"02-liturgy-evening-{date_str}.html",
-        f"02-liturgy-night-{date_str}.html",
-        f"03-gospel-{date_str}.html",
-        f"04-gospel-tomorrow-{date_str}.html",
-        f"05-calendar-{date_str}.html",
-        f"06-news-{date_str}.html",
-    ]
     problems = []
-    print("[안경 페이지] === 인덱스 파일 (안경 등록용 고정 URL) ===")
-    for fn in expected_index_files:
+    for fn in expected_files:
         path = f"glasses/{fn}"
         if not os.path.exists(path):
             problems.append(f"  ❌ {path} 파일이 없음")
             continue
         size = os.path.getsize(path)
-        if size < 300:
-            problems.append(f"  ⚠️ {path} 너무 작음 ({size}바이트)")
-        else:
-            print(f"  ✅ {path} OK ({size}바이트)")
-    print("[안경 페이지] === 본문 파일 (오늘 날짜) ===")
-    for fn in expected_body_files:
-        path = f"glasses/{fn}"
-        if not os.path.exists(path):
-            problems.append(f"  ❌ {path} 파일이 없음")
-            continue
-        size = os.path.getsize(path)
-        if size < 500:
+        if size < 500:  # 너무 작은 파일 (최소 HTML 골격만 있는 수준)
             problems.append(f"  ⚠️ {path} 너무 작음 ({size}바이트)")
         else:
             print(f"  ✅ {path} OK ({size}바이트)")
@@ -862,8 +714,7 @@ code {{ background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-size: 0.
     else:
         print("[안경 페이지] 모든 파일 정상 생성 완료!")
 
-    print(f"glasses/ 폴더 생성 완료: 인덱스 {len(expected_index_files)}개 "
-          f"+ 본문 {len(expected_body_files)}개")
+    print("glasses/ 폴더에 안경(Web Reader)용 HTML 6개 + 안내 페이지 1개 생성 완료!")
 
 
 # ── 메인 ───────────────────────────────────────────────
