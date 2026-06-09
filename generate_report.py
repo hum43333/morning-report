@@ -508,14 +508,16 @@ def text_to_paragraphs_html(text):
     )
 
 
-def write_section_page(filename, title, body_html, date_str):
+def write_section_page(filename, title, body_html, date_str, generated_at=None):
     """안경(Web Reader)용 개별 섹션 HTML 파일 작성.
 
     Web Reader 친화적 구조:
     - <article> 안에 본문이 모두 들어 있음
     - 자바스크립트 없음
     - 단순한 의미적 태그만 사용
+    - 페이지 하단에 "생성 시각"을 표시해서 안경에서도 갱신 여부를 확인 가능
     """
+    gen_at = generated_at or ""
     html = f"""<!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -528,6 +530,7 @@ body {{ font-family: sans-serif; max-width: 700px; margin: 20px auto; padding: 0
 h1 {{ font-size: 1.6em; border-bottom: 2px solid #333; padding-bottom: 0.3em; }}
 h2 {{ font-size: 1.2em; margin-top: 1.5em; color: #333; }}
 .meta {{ color: #888; font-size: 0.9em; margin-bottom: 1.5em; }}
+.genat {{ color: #aaa; font-size: 0.8em; margin-top: 2em; border-top: 1px solid #ddd; padding-top: 0.5em; }}
 p {{ margin: 0.8em 0; }}
 </style>
 </head>
@@ -536,13 +539,19 @@ p {{ margin: 0.8em 0; }}
 <h1>{html_escape(title)}</h1>
 <p class="meta">{html_escape(date_str)}</p>
 {body_html}
+<p class="genat">생성 시각: {html_escape(gen_at)}</p>
 </article>
 </body>
 </html>
 """
     os.makedirs("glasses", exist_ok=True)
-    with open(f"glasses/{filename}", "w", encoding="utf-8") as f:
+    path = f"glasses/{filename}"
+    with open(path, "w", encoding="utf-8") as f:
         f.write(html)
+    # 진단 로그: 실제로 파일이 쓰여졌는지 확인 (사이즈/존재 여부)
+    actual_size = os.path.getsize(path)
+    print(f"  [write] {path}: {actual_size}바이트, 본문 {len(body_html)}자")
+    return actual_size
 
 
 def build_glasses_pages(report):
@@ -551,6 +560,8 @@ def build_glasses_pages(report):
     각 파일은 안경에 따로 등록할 수 있는 독립 페이지.
     """
     date_str = report["date"]
+    gen_at = report.get("generated_at", "")
+    print(f"[안경 페이지] 생성 시작: date={date_str}, generated_at={gen_at}")
 
     # ── 1. 오늘의 날씨 ──
     w = report.get("weather", {})
@@ -563,7 +574,7 @@ def build_glasses_pages(report):
             parts.append(f"<h2>{html_escape(label)}</h2>")
             parts.append(f"<p>{html_escape(val)}</p>")
         weather_body = "\n".join(parts)
-    write_section_page("01-weather.html", "오늘의 날씨", weather_body, date_str)
+    write_section_page("01-weather.html", "오늘의 날씨", weather_body, date_str, gen_at)
 
     # ── 2. 성무일도 (아침/저녁/끝 3종) ──
     # 하위 호환: liturgy_morning 없으면 기존 liturgy 사용
@@ -571,12 +582,16 @@ def build_glasses_pages(report):
     lit_evening = report.get("liturgy_evening", "")
     lit_night   = report.get("liturgy_night", "")
 
+    # 진단 로그: 받은 본문 길이를 미리 확인
+    print(f"[안경 페이지] 성무일도 본문 길이 — 아침: {len(lit_morning)}자, "
+          f"저녁: {len(lit_evening)}자, 끝기도: {len(lit_night)}자")
+
     write_section_page("02-liturgy.html", "오늘의 성무일도 (아침기도)",
-                       text_to_paragraphs_html(lit_morning), date_str)
+                       text_to_paragraphs_html(lit_morning), date_str, gen_at)
     write_section_page("02-liturgy-evening.html", "오늘의 성무일도 (저녁기도)",
-                       text_to_paragraphs_html(lit_evening), date_str)
+                       text_to_paragraphs_html(lit_evening), date_str, gen_at)
     write_section_page("02-liturgy-night.html", "오늘의 성무일도 (끝기도)",
-                       text_to_paragraphs_html(lit_night), date_str)
+                       text_to_paragraphs_html(lit_night), date_str, gen_at)
 
     # ── 3. 오늘의 복음 ──
     def gospel_to_html(g):
@@ -595,11 +610,11 @@ def build_glasses_pages(report):
         return "\n".join(parts) if parts else "<p>정보 없음</p>"
 
     write_section_page("03-gospel.html", "오늘의 복음",
-                       gospel_to_html(report.get("gospel")), date_str)
+                       gospel_to_html(report.get("gospel")), date_str, gen_at)
 
     # ── 4. 내일의 복음 ──
     write_section_page("04-gospel-tomorrow.html", "내일의 복음",
-                       gospel_to_html(report.get("gospel_tomorrow")), date_str)
+                       gospel_to_html(report.get("gospel_tomorrow")), date_str, gen_at)
 
     # ── 5. 일정 ──
     cal = report.get("calendar", {}) or {}
@@ -613,7 +628,7 @@ def build_glasses_pages(report):
         else:
             cal_parts.append("<p>일정 없음</p>")
     write_section_page("05-calendar.html", "일정",
-                       "\n".join(cal_parts), date_str)
+                       "\n".join(cal_parts), date_str, gen_at)
 
     # ── 6. 주요 신문 기사 ──
     news = report.get("news", {}) or {}
@@ -639,7 +654,7 @@ def build_glasses_pages(report):
         else:
             news_parts.append("<p>정보 없음</p>")
     write_section_page("06-news.html", "주요 신문 기사",
-                       "\n".join(news_parts), date_str)
+                       "\n".join(news_parts), date_str, gen_at)
 
     # ── 안내용 인덱스 (사용자가 어떤 URL이 있는지 확인용) ──
     index_html = f"""<!DOCTYPE html>
@@ -673,6 +688,31 @@ code {{ background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-size: 0.
     with open("glasses/index.html", "w", encoding="utf-8") as f:
         f.write(index_html)
 
+    # ── 최종 검증: 모든 파일이 잘 만들어졌고 크기가 충분한지 확인 ──
+    print("[안경 페이지] 최종 파일 검증 시작...")
+    expected_files = [
+        "01-weather.html", "02-liturgy.html", "02-liturgy-evening.html",
+        "02-liturgy-night.html", "03-gospel.html", "04-gospel-tomorrow.html",
+        "05-calendar.html", "06-news.html", "index.html",
+    ]
+    problems = []
+    for fn in expected_files:
+        path = f"glasses/{fn}"
+        if not os.path.exists(path):
+            problems.append(f"  ❌ {path} 파일이 없음")
+            continue
+        size = os.path.getsize(path)
+        if size < 500:  # 너무 작은 파일 (최소 HTML 골격만 있는 수준)
+            problems.append(f"  ⚠️ {path} 너무 작음 ({size}바이트)")
+        else:
+            print(f"  ✅ {path} OK ({size}바이트)")
+    if problems:
+        print("[안경 페이지] 문제 발견:")
+        for p in problems:
+            print(p)
+    else:
+        print("[안경 페이지] 모든 파일 정상 생성 완료!")
+
     print("glasses/ 폴더에 안경(Web Reader)용 HTML 6개 + 안내 페이지 1개 생성 완료!")
 
 
@@ -687,7 +727,7 @@ def main():
 
     report = {
         "date":            today.strftime("%Y-%m-%d"),
-        "generated_at":    now.strftime("%Y-%m-%d %H:%M"),
+        "generated_at":    now.strftime("%Y-%m-%d %H:%M:%S"),
         "weather":         get_weather(),
         "liturgy":         liturgy_morning,   # 하위 호환용 (기존 아침기도)
         "liturgy_morning": liturgy_morning,
