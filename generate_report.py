@@ -84,22 +84,28 @@ def get_weather():
 
 # ── 성무일도 ───────────────────────────────────────────
 # 성무일도 시간대별 stype 파라미터 (catholic.or.kr)
-#   mo = 아침기도, ev = 저녁기도, ni = 끝기도
+#   - 평일과 주일·대축일 당일: stype=mo / ev / ni
+#   - 주일·대축일 전날 (토요일 + 평일 대축일 전날): stype=mo / ev1 / ni1
+# 같은 날짜라도 stype에 따라 다른 페이지가 나옴. 사이트가 없는 페이지를
+# 요청하면 빈 페이지를 돌려주므로, 1차 stype이 실패하면 폴백 stype을 시도한다.
 LITURGY_TYPES = {
-    "morning": {"stype": "mo", "label": "아침기도"},
-    "evening": {"stype": "ev", "label": "저녁기도"},
-    "night":   {"stype": "ni", "label": "끝기도"},
+    "morning": {"stype": "mo",  "fallback_stype": None,  "label": "아침기도"},
+    "evening": {"stype": "ev",  "fallback_stype": "ev1", "label": "저녁기도"},
+    "night":   {"stype": "ni",  "fallback_stype": "ni1", "label": "끝기도"},
 }
 
-# 각 stype의 본문 헤더에 나타나는 이름 후보들.
-# 사이트가 표기를 일관되게 하지 않음:
-#   - "아침 기도" (사이에 공백) vs "저녁기도", "끝기도" (붙임)
-#   - 주일·대축일 전날: "제1저녁기도", "제1저녁기도후 끝기도" 등 변형
-# 매칭은 공백을 모두 제거한 뒤 비교하므로, 공백 있는 변형은 따로 안 적어도 됨.
+# 각 stype의 본문 헤더(테이블 첫 셀)에 나타나는 이름.
+# 매칭은 공백을 모두 제거한 뒤 비교하므로, "아침 기도" 같은 공백 변형도 자동 처리됨.
+#   ev  → "저녁기도" (주일·대축일 당일)
+#   ev1 → "제1저녁기도" (주일·대축일 전날)
+#   ni  → "끝기도" (주일·대축일 당일; 네비게이션에선 "제2후 끝기도"로 표시되지만 본문은 그냥 "끝기도")
+#   ni1 → "제1후 끝기도" (주일·대축일 전날)
 _LITURGY_TABLE_HEADERS = {
     "mo":  ["아침기도"],
-    "ev":  ["저녁기도", "제1저녁기도", "제2저녁기도"],
-    "ni":  ["끝기도", "제1저녁기도후끝기도", "제2저녁기도후끝기도"],
+    "ev":  ["저녁기도"],
+    "ev1": ["제1저녁기도"],
+    "ni":  ["끝기도"],
+    "ni1": ["제1후 끝기도"],
 }
 
 # 성무일도 페이지에 등장할 수 있는 모든 기도 시간 이름 (본문 끝 감지용).
@@ -107,8 +113,8 @@ _LITURGY_TABLE_HEADERS = {
 _ALL_LITURGY_SECTIONS = [
     "초대송", "독서기도", "아침기도", "삼시경", "낮기도",
     "육시경", "구시경", "저녁기도", "끝기도",
-    "제1저녁기도", "제2저녁기도",
-    "제1저녁기도후끝기도", "제2저녁기도후끝기도",
+    "제1저녁기도", "제1후 끝기도",
+    "제2저녁기도", "제2후 끝기도",
 ]
 
 # 본문 끝(=푸터 시작)을 알리는 키워드
@@ -226,13 +232,18 @@ def _fetch_liturgy_one(target_date, stype, label):
 
 
 def get_liturgy(kind="morning", target_date=None):
-    """성무일도 본문 추출 (실패/짧은 결과 시 자동 재시도).
+    """성무일도 본문 추출 (실패 시 자동 재시도 + 자동 폴백 stype 시도).
 
     kind: "morning"(아침기도) / "evening"(저녁기도) / "night"(끝기도)
     target_date: 대상 날짜 (기본값 = 오늘)
 
-    사이트가 일시적으로 빈 페이지나 짧은 응답을 줄 수 있어서,
-    결과가 200자 미만이면 잠시 기다렸다가 최대 3번까지 재시도한다.
+    동작:
+    1) 기본 stype으로 fetch (예: evening → stype=ev)
+    2) 결과가 짧으면 같은 stype으로 최대 3번 재시도 (사이트 일시 장애 대비)
+    3) 그래도 실패하면 폴백 stype으로 자동 전환 (예: ev → ev1)
+       → 주일·대축일 전날(토요일 등)에는 ev/ni 페이지가 비어 있고
+         ev1/ni1 페이지에 본문이 있으므로 자동으로 올바른 페이지를 찾음
+    4) 폴백도 동일하게 최대 3번 재시도
     """
     import time
     if target_date is None:
@@ -240,32 +251,46 @@ def get_liturgy(kind="morning", target_date=None):
     cfg = LITURGY_TYPES.get(kind, LITURGY_TYPES["morning"])
 
     MIN_LENGTH = 200          # 이보다 짧으면 실패로 간주
-    MAX_TRIES  = 3            # 최대 시도 횟수
+    MAX_TRIES  = 3            # 같은 stype 안에서의 최대 시도 횟수
     WAIT_SEC   = 5            # 재시도 전 대기 시간(초)
+
+    # 시도할 stype 목록: 1차(기본) → 폴백 (있는 경우)
+    stype_chain = [cfg["stype"]]
+    if cfg.get("fallback_stype"):
+        stype_chain.append(cfg["fallback_stype"])
 
     last_result = ""
     last_error  = None
-    for attempt in range(1, MAX_TRIES + 1):
-        try:
-            result = _fetch_liturgy_one(target_date, cfg["stype"], cfg["label"])
-            last_result = result
-            # 본문이 충분히 길면 성공
-            if result and len(result) >= MIN_LENGTH and "찾지 못했습니다" not in result:
-                if attempt > 1:
-                    print(f"{cfg['label']}: {attempt}번째 시도에서 성공 ({len(result)}자)")
-                return result
-            # 짧으면 재시도
-            print(f"{cfg['label']}: {attempt}번째 시도 결과가 짧음 ({len(result)}자), "
-                  f"{WAIT_SEC}초 후 재시도")
-        except Exception as e:
-            last_error = e
-            print(f"{cfg['label']}: {attempt}번째 시도 예외 - {e}")
-        if attempt < MAX_TRIES:
-            time.sleep(WAIT_SEC)
 
-    # 모두 실패한 경우: 마지막 결과(짧더라도)를 반환, 아예 없으면 오류 메시지
+    for stype_idx, stype in enumerate(stype_chain):
+        is_fallback = (stype_idx > 0)
+        if is_fallback:
+            print(f"{cfg['label']}: 1차 stype 실패, 폴백 stype={stype}로 전환")
+
+        for attempt in range(1, MAX_TRIES + 1):
+            try:
+                result = _fetch_liturgy_one(target_date, stype, cfg["label"])
+                last_result = result
+                # 본문이 충분히 길면 성공
+                if result and len(result) >= MIN_LENGTH and "찾지 못했습니다" not in result:
+                    tag = f"폴백 stype={stype}" if is_fallback else f"stype={stype}"
+                    if attempt > 1 or is_fallback:
+                        print(f"{cfg['label']}: {tag}의 {attempt}번째 시도에서 성공 ({len(result)}자)")
+                    return result
+                # 짧으면 재시도
+                print(f"{cfg['label']}: stype={stype}의 {attempt}번째 시도 결과가 짧음 "
+                      f"({len(result)}자)")
+            except Exception as e:
+                last_error = e
+                print(f"{cfg['label']}: stype={stype}의 {attempt}번째 시도 예외 - {e}")
+            if attempt < MAX_TRIES:
+                time.sleep(WAIT_SEC)
+
+        # 같은 stype에서 MAX_TRIES 다 썼으면 다음 stype(폴백)으로 진행
+
+    # 모든 stype, 모든 시도 다 실패한 경우
     if last_result:
-        print(f"{cfg['label']}: {MAX_TRIES}번 모두 짧음, 마지막 결과 사용")
+        print(f"{cfg['label']}: 모든 stype·재시도 실패, 마지막 결과 사용")
         return last_result
     return f"{cfg['label']} 오류: {last_error}" if last_error else f"{cfg['label']} 본문을 찾지 못했습니다."
 
