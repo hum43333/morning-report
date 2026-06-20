@@ -84,14 +84,36 @@ def get_weather():
 
 # ── 성무일도 ───────────────────────────────────────────
 # 성무일도 시간대별 stype 파라미터 (catholic.or.kr)
-#   - 평일과 주일·대축일 당일: stype=mo / ev / ni
-#   - 주일·대축일 전날 (토요일 + 평일 대축일 전날): stype=mo / ev1 / ni1
-# 같은 날짜라도 stype에 따라 다른 페이지가 나옴. 사이트가 없는 페이지를
-# 요청하면 빈 페이지를 돌려주므로, 1차 stype이 실패하면 폴백 stype을 시도한다.
+#
+# 사이트의 동작 규칙:
+#   - 평일·주일·대축일 당일: stype=mo / ev / ni 로 그날 페이지에서 받음
+#   - 토요일이나 평일 중 대축일 전날: 그날 페이지에 ev/ni가 아예 없음.
+#     다음날(주일·대축일) 페이지로 가서 stype=ev1(제1저녁기도) /
+#     stype=ni1(제1후 끝기도) 로 받아야 함.
+#
+# 폴백 동작:
+#   1차: 당일 날짜의 stype=ev (또는 ni)로 시도
+#   실패 시: 다음날 날짜의 stype=ev1 (또는 ni1)로 폴백
+#     ← fallback_day_offset = +1 이 그 "다음날" 의미
 LITURGY_TYPES = {
-    "morning": {"stype": "mo",  "fallback_stype": None,  "label": "아침기도"},
-    "evening": {"stype": "ev",  "fallback_stype": "ev1", "label": "저녁기도"},
-    "night":   {"stype": "ni",  "fallback_stype": "ni1", "label": "끝기도"},
+    "morning": {
+        "stype": "mo",
+        "fallback_stype": None,
+        "fallback_day_offset": 0,
+        "label": "아침기도",
+    },
+    "evening": {
+        "stype": "ev",
+        "fallback_stype": "ev1",
+        "fallback_day_offset": 1,   # 폴백 시 다음날 페이지를 봄
+        "label": "저녁기도",
+    },
+    "night": {
+        "stype": "ni",
+        "fallback_stype": "ni1",
+        "fallback_day_offset": 1,   # 폴백 시 다음날 페이지를 봄
+        "label": "끝기도",
+    },
 }
 
 # 각 stype의 본문 헤더(테이블 첫 셀)에 나타나는 이름.
@@ -234,17 +256,17 @@ def _fetch_liturgy_one(target_date, stype, label):
 
 
 def get_liturgy(kind="morning", target_date=None):
-    """성무일도 본문 추출 (실패 시 자동 재시도 + 자동 폴백 stype 시도).
+    """성무일도 본문 추출 (실패 시 자동 재시도 + 자동 폴백 시도).
 
     kind: "morning"(아침기도) / "evening"(저녁기도) / "night"(끝기도)
     target_date: 대상 날짜 (기본값 = 오늘)
 
     동작:
-    1) 기본 stype으로 fetch (예: evening → stype=ev)
-    2) 결과가 짧으면 같은 stype으로 최대 3번 재시도 (사이트 일시 장애 대비)
-    3) 그래도 실패하면 폴백 stype으로 자동 전환 (예: ev → ev1)
-       → 주일·대축일 전날(토요일 등)에는 ev/ni 페이지가 비어 있고
-         ev1/ni1 페이지에 본문이 있으므로 자동으로 올바른 페이지를 찾음
+    1) 기본 stype으로 fetch (예: evening → stype=ev, 당일 날짜)
+    2) 결과가 짧으면 같은 (날짜+stype)으로 최대 3번 재시도 (사이트 일시 장애 대비)
+    3) 그래도 실패하면 폴백 stype + 폴백 날짜(다음날)로 자동 전환
+       → 토요일이나 평일 대축일 전날은 그날 페이지에 ev/ni가 없고,
+         다음날(주일·대축일) 페이지에 ev1/ni1이 있기 때문.
     4) 폴백도 동일하게 최대 3번 재시도
     """
     import time
@@ -253,46 +275,51 @@ def get_liturgy(kind="morning", target_date=None):
     cfg = LITURGY_TYPES.get(kind, LITURGY_TYPES["morning"])
 
     MIN_LENGTH = 200          # 이보다 짧으면 실패로 간주
-    MAX_TRIES  = 3            # 같은 stype 안에서의 최대 시도 횟수
+    MAX_TRIES  = 3            # 같은 시도 안에서의 최대 횟수
     WAIT_SEC   = 5            # 재시도 전 대기 시간(초)
 
-    # 시도할 stype 목록: 1차(기본) → 폴백 (있는 경우)
-    stype_chain = [cfg["stype"]]
+    # 시도 순서: 1차(기본 stype + 당일) → 폴백 (폴백 stype + 다음날)
+    # 각 항목은 (날짜, stype) 튜플
+    attempts_chain = [(target_date, cfg["stype"])]
     if cfg.get("fallback_stype"):
-        stype_chain.append(cfg["fallback_stype"])
+        offset = cfg.get("fallback_day_offset", 0)
+        fb_date = target_date + datetime.timedelta(days=offset)
+        attempts_chain.append((fb_date, cfg["fallback_stype"]))
 
     last_result = ""
     last_error  = None
 
-    for stype_idx, stype in enumerate(stype_chain):
-        is_fallback = (stype_idx > 0)
+    for chain_idx, (try_date, stype) in enumerate(attempts_chain):
+        is_fallback = (chain_idx > 0)
         if is_fallback:
-            print(f"{cfg['label']}: 1차 stype 실패, 폴백 stype={stype}로 전환")
+            print(f"{cfg['label']}: 1차 실패, 폴백으로 전환 "
+                  f"(날짜 {try_date.strftime('%Y-%m-%d')}, stype={stype})")
 
         for attempt in range(1, MAX_TRIES + 1):
             try:
-                result = _fetch_liturgy_one(target_date, stype, cfg["label"])
+                result = _fetch_liturgy_one(try_date, stype, cfg["label"])
                 last_result = result
                 # 본문이 충분히 길면 성공
                 if result and len(result) >= MIN_LENGTH and "찾지 못했습니다" not in result:
-                    tag = f"폴백 stype={stype}" if is_fallback else f"stype={stype}"
-                    if attempt > 1 or is_fallback:
-                        print(f"{cfg['label']}: {tag}의 {attempt}번째 시도에서 성공 ({len(result)}자)")
+                    tag = "폴백" if is_fallback else "1차"
+                    print(f"{cfg['label']}: {tag} 시도({try_date.strftime('%Y-%m-%d')}, "
+                          f"stype={stype})의 {attempt}번째에서 성공 ({len(result)}자)")
                     return result
                 # 짧으면 재시도
-                print(f"{cfg['label']}: stype={stype}의 {attempt}번째 시도 결과가 짧음 "
-                      f"({len(result)}자)")
+                print(f"{cfg['label']}: ({try_date.strftime('%Y-%m-%d')}, stype={stype}) "
+                      f"{attempt}번째 시도 결과가 짧음 ({len(result)}자)")
             except Exception as e:
                 last_error = e
-                print(f"{cfg['label']}: stype={stype}의 {attempt}번째 시도 예외 - {e}")
+                print(f"{cfg['label']}: ({try_date.strftime('%Y-%m-%d')}, stype={stype}) "
+                      f"{attempt}번째 시도 예외 - {e}")
             if attempt < MAX_TRIES:
                 time.sleep(WAIT_SEC)
 
-        # 같은 stype에서 MAX_TRIES 다 썼으면 다음 stype(폴백)으로 진행
+        # 같은 (날짜+stype)에서 MAX_TRIES 다 썼으면 다음 시도(폴백)로 진행
 
-    # 모든 stype, 모든 시도 다 실패한 경우
+    # 모든 시도 다 실패한 경우
     if last_result:
-        print(f"{cfg['label']}: 모든 stype·재시도 실패, 마지막 결과 사용")
+        print(f"{cfg['label']}: 모든 시도 실패, 마지막 결과 사용")
         return last_result
     return f"{cfg['label']} 오류: {last_error}" if last_error else f"{cfg['label']} 본문을 찾지 못했습니다."
 
