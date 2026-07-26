@@ -21,6 +21,11 @@ today     = now.date()
 yesterday = today - datetime.timedelta(days=1)
 tomorrow  = today + datetime.timedelta(days=1)
 
+# 가장 가까운(다가올) 일요일. 오늘이 일요일이면 오늘 그 자체.
+# Python의 weekday(): 월=0 ... 일=6
+_days_until_sunday = (6 - today.weekday()) % 7
+next_sunday = today + datetime.timedelta(days=_days_until_sunday)
+
 WEATHER_API_KEY = os.environ.get("WEATHER_API_KEY", "")
 
 ICAL_URLS = [
@@ -671,6 +676,12 @@ def build_glasses_pages(report):
     write_section_page("04-gospel-tomorrow.html", "내일의 복음",
                        gospel_to_html(report.get("gospel_tomorrow")), date_str, gen_at)
 
+    # ── 4-1. 주일의 복음 (다가올 일요일) ──
+    sunday_date_str = report.get("gospel_next_sunday_date", "")
+    sunday_title = f"주일의 복음 ({sunday_date_str})" if sunday_date_str else "주일의 복음"
+    write_section_page("07-gospel-sunday.html", sunday_title,
+                       gospel_to_html(report.get("gospel_next_sunday")), date_str, gen_at)
+
     # ── 5. 일정 ── (안경 메뉴에서는 사용 안 함. 코드는 보존만)
     cal = report.get("calendar", {}) or {}
     cal_parts = []
@@ -734,6 +745,7 @@ code {{ background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-size: 0.
 <li><a href="02-liturgy-night.html">오늘의 성무일도 (끝기도)</a></li>
 <li><a href="03-gospel.html">오늘의 복음</a></li>
 <li><a href="04-gospel-tomorrow.html">내일의 복음</a></li>
+<li><a href="07-gospel-sunday.html">주일의 복음</a></li>
 <li><a href="06-news.html">주요 신문 기사</a></li>
 </ol>
 </body>
@@ -748,6 +760,7 @@ code {{ background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-size: 0.
     expected_files = [
         "01-weather.html", "02-liturgy.html", "02-liturgy-evening.html",
         "02-liturgy-night.html", "03-gospel.html", "04-gospel-tomorrow.html",
+        "07-gospel-sunday.html",
         "05-calendar.html", "06-news.html", "index.html",
     ]
     problems = []
@@ -790,6 +803,8 @@ def main():
         "liturgy_night":   liturgy_night,
         "gospel":          get_gospel(today),
         "gospel_tomorrow": get_gospel(tomorrow),
+        "gospel_next_sunday":      get_gospel(next_sunday),
+        "gospel_next_sunday_date": next_sunday.strftime("%Y-%m-%d"),
         "calendar": {
             "yesterday": get_calendar_events(yesterday),
             "today":     get_calendar_events(today),
