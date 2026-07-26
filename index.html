@@ -171,6 +171,7 @@
       <a href="#" onclick="openDetail('liturgy_night'); return false;">오늘의 성무일도 (끝기도)</a>
       <a href="#" onclick="openDetail('gospel'); return false;">오늘의 복음</a>
       <a href="#" onclick="openDetail('gospel_tomorrow'); return false;">내일의 복음</a>
+      <a href="#" onclick="openDetail('gospel_next_sunday'); return false;">주일의 복음</a>
       <a href="#" onclick="openDetail('news'); return false;">주요 신문 기사</a>
     </nav>
 
@@ -205,6 +206,7 @@
       liturgy_night:   '오늘의 성무일도 (끝기도)',
       gospel:          '오늘의 복음',
       gospel_tomorrow: '내일의 복음',
+      gospel_next_sunday: '주일의 복음',
       calendar:        '일정',
       news:            '주요 신문 기사',
     };
@@ -231,7 +233,11 @@
     }
 
     function openDetail(section) {
-      document.getElementById('detail-title').textContent = TITLES[section];
+      let title = TITLES[section];
+      if (section === 'gospel_next_sunday' && reportData && reportData.gospel_next_sunday_date) {
+        title = `주일의 복음 (${reportData.gospel_next_sunday_date})`;
+      }
+      document.getElementById('detail-title').textContent = title;
       document.getElementById('detail-body').innerHTML =
         reportData ? renderSection(section) : '데이터 없음';
       document.getElementById('main-page').style.display = 'none';
@@ -309,6 +315,10 @@
 
       if (section === 'gospel_tomorrow') {
         return renderGospel(d.gospel_tomorrow);
+      }
+
+      if (section === 'gospel_next_sunday') {
+        return renderGospel(d.gospel_next_sunday);
       }
 
       if (section === 'calendar') {
