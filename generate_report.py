@@ -677,10 +677,16 @@ def build_glasses_pages(report):
                        gospel_to_html(report.get("gospel_tomorrow")), date_str, gen_at)
 
     # ── 4-1. 주일의 복음 (다가올 일요일) ──
+    # 제목은 다른 메뉴와 동일하게 "주일의 복음"만. (write_section_page가
+    # 자동으로 뒤에 (생성날짜)를 붙이므로 여기서 날짜를 넣으면 괄호가 중복되어
+    # Glance가 제목을 파싱하지 못함.) 대신 다가올 일요일 날짜는 본문 맨 위에 표시.
     sunday_date_str = report.get("gospel_next_sunday_date", "")
-    sunday_title = f"주일의 복음 ({sunday_date_str})" if sunday_date_str else "주일의 복음"
-    write_section_page("07-gospel-sunday.html", sunday_title,
-                       gospel_to_html(report.get("gospel_next_sunday")), date_str, gen_at)
+    sunday_body = gospel_to_html(report.get("gospel_next_sunday"))
+    if sunday_date_str:
+        sunday_body = (f'<p class="meta">해당 주일: {html_escape(sunday_date_str)}</p>\n'
+                       + sunday_body)
+    write_section_page("07-gospel-sunday.html", "주일의 복음",
+                       sunday_body, date_str, gen_at)
 
     # ── 5. 일정 ── (안경 메뉴에서는 사용 안 함. 코드는 보존만)
     cal = report.get("calendar", {}) or {}
