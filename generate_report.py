@@ -688,19 +688,7 @@ def build_webscope_pages(report):
     gen_at = report.get("generated_at", "")
     print(f"[WebScope] 생성 시작: date={date_str}")
 
-    # 1. 날씨
-    w = report.get("weather", {})
-    if isinstance(w, str):
-        weather_body = f"<p>{html_escape(w)}</p>"
-    else:
-        parts = []
-        for key, label in [("morning", "아침"), ("afternoon", "낮"), ("evening", "저녁")]:
-            val = (w or {}).get(key) or "정보 없음"
-            parts.append(f"{html_escape(label)}: {html_escape(val)}")
-        weather_body = f"<p>{_WS_SEP.join(parts)}</p>"
-    write_webscope_page("01-weather.html", "오늘의 날씨", weather_body, date_str, gen_at)
-
-    # 2. 성무일도 3종
+    # 성무일도 3종
     lit_morning = report.get("liturgy_morning") or report.get("liturgy", "")
     lit_evening = report.get("liturgy_evening", "")
     lit_night   = report.get("liturgy_night", "")
@@ -740,28 +728,6 @@ def build_webscope_pages(report):
     write_webscope_page("07-gospel-sunday.html", "주일의 복음",
                         sunday_body, date_str, gen_at)
 
-    # 6. 신문 (각 신문 제목을 세로줄로 구분)
-    news = report.get("news", {}) or {}
-    paper_names = {"hankyoreh": "한겨레", "chosun": "조선일보", "donga": "동아일보"}
-    news_parts = []
-    seen = set()
-    for key in ["hankyoreh", "chosun", "donga"]:
-        if key not in news:
-            continue
-        display = paper_names.get(key, key)
-        if display in seen:
-            continue
-        seen.add(display)
-        articles_list = news.get(key) or []
-        news_parts.append(f"<h2>{html_escape(display)}</h2>")
-        if articles_list:
-            items = [f"{i}. {html_escape(t)}" for i, t in enumerate(articles_list, 1)]
-            news_parts.append(f"<p>{_WS_SEP.join(items)}</p>")
-        else:
-            news_parts.append("<p>정보 없음</p>")
-    write_webscope_page("06-news.html", "주요 신문 기사",
-                        "\n".join(news_parts), date_str, gen_at)
-
     # 목록 페이지 (Web Scope는 이 URL 하나만 등록하면 됨)
     index_html = f"""<!DOCTYPE html>
 <html lang="ko">
@@ -777,14 +743,12 @@ li {{ margin: 0.5em 0; }}
 <h1>모닝 리포트</h1>
 <p>{html_escape(date_str)}</p>
 <ol>
-<li><a href="01-weather.html">오늘의 날씨</a></li>
 <li><a href="02-liturgy.html">오늘의 성무일도 (아침기도)</a></li>
 <li><a href="02-liturgy-evening.html">오늘의 성무일도 (저녁기도)</a></li>
 <li><a href="02-liturgy-night.html">오늘의 성무일도 (끝기도)</a></li>
 <li><a href="03-gospel.html">오늘의 복음</a></li>
 <li><a href="04-gospel-tomorrow.html">내일의 복음</a></li>
 <li><a href="07-gospel-sunday.html">주일의 복음</a></li>
-<li><a href="06-news.html">주요 신문 기사</a></li>
 </ol>
 </body>
 </html>
@@ -792,7 +756,7 @@ li {{ margin: 0.5em 0; }}
     os.makedirs("webscope", exist_ok=True)
     with open("webscope/index.html", "w", encoding="utf-8") as f:
         f.write(index_html)
-    print("[WebScope] webscope/ 폴더 생성 완료 (본문 8개 + 목록 1개)")
+    print("[WebScope] webscope/ 폴더 생성 완료 (성무일도 3종 + 복음 3종 + 목록)")
 
 
 def build_glasses_pages(report):
