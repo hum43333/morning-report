@@ -613,6 +613,188 @@ p {{ margin: 0.8em 0; }}
     return actual_size
 
 
+# ── Web Scope 전용 (J방식: 세로줄 구분) ──────────────────
+# Web Scope는 <br>/<p> 등 모든 줄바꿈을 무시하고 텍스트를 한 줄로 흘려보낸 뒤
+# 화면 너비에 맞춰 자동 줄바꿈만 한다. 특수 유니코드(·, 전각공백)를 넣으면
+# 본문 추출이 실패한다. 테스트 결과 세로줄(|)은 본문에 정상 표시되므로,
+# 줄과 줄 사이를 " | " 로 구분해 문장 경계를 눈으로 알아볼 수 있게 한다.
+_WS_SEP = " | "
+
+def text_to_webscope_html(text):
+    """줄바꿈이 든 텍스트를 Web Scope용 한 단락 HTML로 변환.
+    각 줄을 " | "로 이어 붙인다(빈 줄은 건너뜀). 태그 줄바꿈은 쓰지 않는다.
+    """
+    if not text:
+        return "<p>정보 없음</p>"
+    lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+    if not lines:
+        return "<p>정보 없음</p>"
+    joined = _WS_SEP.join(html_escape(ln) for ln in lines)
+    return f"<p>{joined}</p>"
+
+
+def write_webscope_page(filename, title, body_html, date_str, generated_at=None):
+    """Web Scope용 개별 섹션 HTML을 webscope/ 폴더에 작성.
+
+    구조는 Glance용(write_section_page)과 같되, 저장 위치만 webscope/.
+    본문은 text_to_webscope_html로 만든 '한 단락 + 세로줄 구분' 형태를 기대.
+    """
+    gen_at = generated_at or ""
+    html = f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{html_escape(title)} ({html_escape(date_str)})</title>
+<meta name="description" content="{html_escape(title)} - {html_escape(date_str)}">
+<style>
+body {{ font-family: sans-serif; max-width: 700px; margin: 20px auto; padding: 0 20px; line-height: 1.7; color: #222; }}
+h1 {{ font-size: 1.6em; border-bottom: 2px solid #333; padding-bottom: 0.3em; }}
+h2 {{ font-size: 1.2em; margin-top: 1.5em; color: #333; }}
+.meta {{ color: #888; font-size: 0.9em; margin-bottom: 1.5em; }}
+.genat {{ color: #aaa; font-size: 0.8em; margin-top: 2em; border-top: 1px solid #ddd; padding-top: 0.5em; }}
+p {{ margin: 0.8em 0; }}
+</style>
+</head>
+<body>
+<article>
+<h1>{html_escape(title)}</h1>
+<p class="meta">{html_escape(date_str)}</p>
+{body_html}
+<p class="genat">생성 시각: {html_escape(gen_at)}</p>
+</article>
+</body>
+</html>
+"""
+    os.makedirs("webscope", exist_ok=True)
+    path = f"webscope/{filename}"
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(html)
+    actual_size = os.path.getsize(path)
+    print(f"  [webscope] {path}: {actual_size}바이트, 본문 {len(body_html)}자")
+    return actual_size
+
+
+def build_webscope_pages(report):
+    """report로부터 Web Scope 전용 HTML을 webscope/ 폴더에 만든다.
+
+    Glance용 build_glasses_pages와 내용은 같지만:
+    - 줄 구분을 <br> 대신 " | "(세로줄)로 처리 (text_to_webscope_html)
+    - 저장 위치가 webscope/
+    - 안경에는 메인 목록 URL(webscope/index.html) 하나만 등록하면
+      Web Scope가 커서 이동으로 각 항목에 들어갈 수 있음
+    """
+    date_str = report["date"]
+    gen_at = report.get("generated_at", "")
+    print(f"[WebScope] 생성 시작: date={date_str}")
+
+    # 1. 날씨
+    w = report.get("weather", {})
+    if isinstance(w, str):
+        weather_body = f"<p>{html_escape(w)}</p>"
+    else:
+        parts = []
+        for key, label in [("morning", "아침"), ("afternoon", "낮"), ("evening", "저녁")]:
+            val = (w or {}).get(key) or "정보 없음"
+            parts.append(f"{html_escape(label)}: {html_escape(val)}")
+        weather_body = f"<p>{_WS_SEP.join(parts)}</p>"
+    write_webscope_page("01-weather.html", "오늘의 날씨", weather_body, date_str, gen_at)
+
+    # 2. 성무일도 3종
+    lit_morning = report.get("liturgy_morning") or report.get("liturgy", "")
+    lit_evening = report.get("liturgy_evening", "")
+    lit_night   = report.get("liturgy_night", "")
+    write_webscope_page("02-liturgy.html", "오늘의 성무일도 (아침기도)",
+                        text_to_webscope_html(lit_morning), date_str, gen_at)
+    write_webscope_page("02-liturgy-evening.html", "오늘의 성무일도 (저녁기도)",
+                        text_to_webscope_html(lit_evening), date_str, gen_at)
+    write_webscope_page("02-liturgy-night.html", "오늘의 성무일도 (끝기도)",
+                        text_to_webscope_html(lit_night), date_str, gen_at)
+
+    # 3~4-1. 복음(오늘/내일/주일)
+    def gospel_to_ws_html(g):
+        if not g:
+            return "<p>정보 없음</p>"
+        parts = []
+        if g.get("reading1"):
+            parts.append("<h2>제1독서</h2>")
+            parts.append(text_to_webscope_html(g["reading1"]))
+        if g.get("reading2"):
+            parts.append("<h2>제2독서</h2>")
+            parts.append(text_to_webscope_html(g["reading2"]))
+        if g.get("gospel"):
+            parts.append("<h2>복음</h2>")
+            parts.append(text_to_webscope_html(g["gospel"]))
+        return "\n".join(parts) if parts else "<p>정보 없음</p>"
+
+    write_webscope_page("03-gospel.html", "오늘의 복음",
+                        gospel_to_ws_html(report.get("gospel")), date_str, gen_at)
+    write_webscope_page("04-gospel-tomorrow.html", "내일의 복음",
+                        gospel_to_ws_html(report.get("gospel_tomorrow")), date_str, gen_at)
+
+    sunday_date_str = report.get("gospel_next_sunday_date", "")
+    sunday_body = gospel_to_ws_html(report.get("gospel_next_sunday"))
+    if sunday_date_str:
+        sunday_body = (f'<p class="meta">해당 주일: {html_escape(sunday_date_str)}</p>\n'
+                       + sunday_body)
+    write_webscope_page("07-gospel-sunday.html", "주일의 복음",
+                        sunday_body, date_str, gen_at)
+
+    # 6. 신문 (각 신문 제목을 세로줄로 구분)
+    news = report.get("news", {}) or {}
+    paper_names = {"hankyoreh": "한겨레", "chosun": "조선일보", "donga": "동아일보"}
+    news_parts = []
+    seen = set()
+    for key in ["hankyoreh", "chosun", "donga"]:
+        if key not in news:
+            continue
+        display = paper_names.get(key, key)
+        if display in seen:
+            continue
+        seen.add(display)
+        articles_list = news.get(key) or []
+        news_parts.append(f"<h2>{html_escape(display)}</h2>")
+        if articles_list:
+            items = [f"{i}. {html_escape(t)}" for i, t in enumerate(articles_list, 1)]
+            news_parts.append(f"<p>{_WS_SEP.join(items)}</p>")
+        else:
+            news_parts.append("<p>정보 없음</p>")
+    write_webscope_page("06-news.html", "주요 신문 기사",
+                        "\n".join(news_parts), date_str, gen_at)
+
+    # 목록 페이지 (Web Scope는 이 URL 하나만 등록하면 됨)
+    index_html = f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>모닝 리포트 (Web Scope용)</title>
+<style>
+body {{ font-family: sans-serif; max-width: 700px; margin: 20px auto; padding: 0 20px; line-height: 1.7; }}
+li {{ margin: 0.5em 0; }}
+</style>
+</head>
+<body>
+<h1>모닝 리포트</h1>
+<p>{html_escape(date_str)}</p>
+<ol>
+<li><a href="01-weather.html">오늘의 날씨</a></li>
+<li><a href="02-liturgy.html">오늘의 성무일도 (아침기도)</a></li>
+<li><a href="02-liturgy-evening.html">오늘의 성무일도 (저녁기도)</a></li>
+<li><a href="02-liturgy-night.html">오늘의 성무일도 (끝기도)</a></li>
+<li><a href="03-gospel.html">오늘의 복음</a></li>
+<li><a href="04-gospel-tomorrow.html">내일의 복음</a></li>
+<li><a href="07-gospel-sunday.html">주일의 복음</a></li>
+<li><a href="06-news.html">주요 신문 기사</a></li>
+</ol>
+</body>
+</html>
+"""
+    os.makedirs("webscope", exist_ok=True)
+    with open("webscope/index.html", "w", encoding="utf-8") as f:
+        f.write(index_html)
+    print("[WebScope] webscope/ 폴더 생성 완료 (본문 8개 + 목록 1개)")
+
+
 def build_glasses_pages(report):
     """report 딕셔너리로부터 안경(Glance/Web Reader)용 HTML을 만든다.
 
@@ -860,6 +1042,17 @@ def main():
                 f.write(err_msg)
         except Exception:
             pass
+
+    # Web Scope 전용 HTML 생성 (webscope/ 폴더). Glance용과 독립적으로 처리.
+    try:
+        build_webscope_pages(report)
+    except Exception as e:
+        import traceback
+        print("=" * 60)
+        print("!!! Web Scope용 HTML 생성 실패 !!!")
+        print(f"오류: {e}")
+        print(traceback.format_exc())
+        print("=" * 60)
 
 
 if __name__ == "__main__":
