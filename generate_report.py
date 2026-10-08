@@ -783,13 +783,10 @@ def glasses_lead_html(short_title, date_str, generated_at=""):
     lines = ["성무일도", date_line, short_title]
     if generated_at:
         lines.append(f"생성 {generated_at}")
-    lines += [
-        "- - - - - - - - - -",
-        "이 화면은 미리보기입니다.",
-        "기도 본문은 다음 화면부터",
-        "처음부터 이어집니다.",
-        "- - - - - - - - - -",
-    ]
+    # 절취선 한 줄. 안경 앱이 미리보기로 집어가는 분량(관찰값 약 110자)을
+    # 채워야 기도 첫 줄이 미리보기에 끼어들지 않으므로, 선을 길게 둔다.
+    # 화면에서는 두세 줄로 접혀 보인다.
+    lines.append("- " * 33)
     return "<p>" + "<br>".join(html_escape(ln) for ln in lines) + "</p>\n"
 
 
