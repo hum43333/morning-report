@@ -759,6 +759,40 @@ li {{ margin: 0.5em 0; }}
     print("[WebScope] webscope/ 폴더 생성 완료 (성무일도 3종 + 복음 3종 + 목록)")
 
 
+# ── 안경 앱 미리보기 대응 ──────────────────────────────────
+# 안경 앱(KR Community Reader)은 본문의 첫 한 화면을 '미리보기'로 먼저 보여주고,
+# 그다음 화면부터 본문을 처음부터 다시 펼친다. 그래서 기도 시작 부분
+# ("하느님, 날 구하소서 ~ 아멘. 알렐루야.")이 두 번 반복돼 보였다.
+# 본문 맨 앞에 한 화면 분량의 표지를 넣어, 미리보기가 집어가는 부분이
+# 기도 본문이 아니라 표지가 되게 한다. (2026-10 적용)
+_WEEKDAY_KO = ["월", "화", "수", "목", "금", "토", "일"]
+
+
+def glasses_lead_html(short_title, date_str, generated_at=""):
+    """안경 페이지 본문 맨 앞에 넣을 표지 블록 HTML.
+
+    미리보기로 잡혀가는 분량(관찰값 약 7줄·80자)보다 넉넉하게 줄을 둔다.
+    """
+    date_line = str(date_str)
+    try:
+        y, m, d = (int(x) for x in str(date_str).split("-"))
+        date_line = f"{date_str} {_WEEKDAY_KO[datetime.date(y, m, d).weekday()]}요일"
+    except Exception:
+        pass
+
+    lines = ["성무일도", date_line, short_title]
+    if generated_at:
+        lines.append(f"생성 {generated_at}")
+    lines += [
+        "- - - - - - - - - -",
+        "이 화면은 미리보기입니다.",
+        "기도 본문은 다음 화면부터",
+        "처음부터 이어집니다.",
+        "- - - - - - - - - -",
+    ]
+    return "<p>" + "<br>".join(html_escape(ln) for ln in lines) + "</p>\n"
+
+
 def build_glasses_pages(report):
     """report 딕셔너리로부터 안경(Glance/Web Reader)용 HTML을 만든다.
 
@@ -793,11 +827,14 @@ def build_glasses_pages(report):
           f"저녁: {len(lit_evening)}자, 끝기도: {len(lit_night)}자")
 
     write_section_page("02-liturgy.html", "오늘의 성무일도 (아침기도)",
-                       text_to_paragraphs_html(lit_morning), date_str, gen_at)
+                       glasses_lead_html("아침기도", date_str, gen_at)
+                       + text_to_paragraphs_html(lit_morning), date_str, gen_at)
     write_section_page("02-liturgy-evening.html", "오늘의 성무일도 (저녁기도)",
-                       text_to_paragraphs_html(lit_evening), date_str, gen_at)
+                       glasses_lead_html("저녁기도", date_str, gen_at)
+                       + text_to_paragraphs_html(lit_evening), date_str, gen_at)
     write_section_page("02-liturgy-night.html", "오늘의 성무일도 (끝기도)",
-                       text_to_paragraphs_html(lit_night), date_str, gen_at)
+                       glasses_lead_html("끝기도", date_str, gen_at)
+                       + text_to_paragraphs_html(lit_night), date_str, gen_at)
 
     # ── 3. 오늘의 복음 ──
     def gospel_to_html(g):
