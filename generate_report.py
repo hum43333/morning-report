@@ -21,9 +21,11 @@ today     = now.date()
 yesterday = today - datetime.timedelta(days=1)
 tomorrow  = today + datetime.timedelta(days=1)
 
-# 가장 가까운(다가올) 일요일. 오늘이 일요일이면 오늘 그 자체.
+# 다가올 일요일. 오늘이 일요일이면 "오늘"이 아니라 다음 주 일요일(+7).
+# (주일 당일에는 그날 전례를 이미 보고 있으므로, 미리 보는 의미가 있는
+#  다음 주일의 독서·복음을 가져온다.)
 # Python의 weekday(): 월=0 ... 일=6
-_days_until_sunday = (6 - today.weekday()) % 7
+_days_until_sunday = (6 - today.weekday()) % 7 or 7
 next_sunday = today + datetime.timedelta(days=_days_until_sunday)
 
 WEATHER_API_KEY = os.environ.get("WEATHER_API_KEY", "")
@@ -542,6 +544,26 @@ def html_escape(s):
             .replace('"', "&quot;"))
 
 
+def strip_leading_label(text, label):
+    """본문 첫 줄이 소제목과 같으면 그 줄을 떼어낸다.
+
+    가톨릭 사이트에서 가져온 독서 본문은 첫 줄이 "제1독서"처럼 소제목과
+    같은 경우가 있어, 우리가 붙인 <h2> 소제목과 겹쳐 두 번 보였다.
+    첫 줄이 소제목과 다르면(예: 주일 독서의 안내문) 그대로 둔다.
+    """
+    if not text:
+        return text
+    lines = text.split("\n")
+    target = "".join(str(label).split())
+    for i, ln in enumerate(lines):
+        if not ln.strip():
+            continue
+        if "".join(ln.split()) == target:
+            return "\n".join(lines[:i] + lines[i + 1:])
+        break
+    return text
+
+
 def text_to_paragraphs_html(text):
     """줄바꿈이 들어있는 텍스트를 <p> 태그로 감싼 HTML로 변환.
     빈 줄 단위로 단락을 나누고, 단락 내부의 줄바꿈은 <br>로 보존.
@@ -761,17 +783,20 @@ li {{ margin: 0.5em 0; }}
 
 # ── 안경 앱 미리보기 대응 ──────────────────────────────────
 # 안경 앱(KR Community Reader)은 본문의 첫 한 화면을 '미리보기'로 먼저 보여주고,
-# 그다음 화면부터 본문을 처음부터 다시 펼친다. 그래서 기도 시작 부분
-# ("하느님, 날 구하소서 ~ 아멘. 알렐루야.")이 두 번 반복돼 보였다.
+# 그다음 화면부터 본문을 처음부터 다시 펼친다. 그래서 본문 첫머리
+# (기도의 "하느님, 날 구하소서 ~ 아멘. 알렐루야." 등)가 두 번 반복돼 보였다.
 # 본문 맨 앞에 한 화면 분량의 표지를 넣어, 미리보기가 집어가는 부분이
-# 기도 본문이 아니라 표지가 되게 한다. (2026-10 적용)
+# 본문이 아니라 표지가 되게 한다.
+# (2026-10 성무일도 3종에 적용 → 복음 3종에도 확대 적용)
 _WEEKDAY_KO = ["월", "화", "수", "목", "금", "토", "일"]
 
 
-def glasses_lead_html(short_title, date_str, generated_at=""):
+def glasses_lead_html(category, short_title, date_str, generated_at="", extra=""):
     """안경 페이지 본문 맨 앞에 넣을 표지 블록 HTML.
 
-    미리보기로 잡혀가는 분량(관찰값 약 7줄·80자)보다 넉넉하게 줄을 둔다.
+    category   : "성무일도" / "복음" 같은 큰 구분
+    short_title: "아침기도", "오늘의 복음" 같은 항목 이름
+    extra      : 필요하면 한 줄 더 (예: 주일의 복음의 "해당 주일 2026-10-18")
     """
     date_line = str(date_str)
     try:
@@ -780,11 +805,13 @@ def glasses_lead_html(short_title, date_str, generated_at=""):
     except Exception:
         pass
 
-    lines = ["성무일도", date_line, short_title]
+    lines = [category, date_line, short_title]
+    if extra:
+        lines.append(extra)
     if generated_at:
         lines.append(f"생성 {generated_at}")
     # 절취선 한 줄. 안경 앱이 미리보기로 집어가는 분량(관찰값 약 110자)을
-    # 채워야 기도 첫 줄이 미리보기에 끼어들지 않으므로, 선을 길게 둔다.
+    # 채워야 본문 첫 줄이 미리보기에 끼어들지 않으므로, 선을 길게 둔다.
     # 화면에서는 두세 줄로 접혀 보인다.
     lines.append("- " * 33)
     return "<p>" + "<br>".join(html_escape(ln) for ln in lines) + "</p>\n"
@@ -824,13 +851,13 @@ def build_glasses_pages(report):
           f"저녁: {len(lit_evening)}자, 끝기도: {len(lit_night)}자")
 
     write_section_page("02-liturgy.html", "오늘의 성무일도 (아침기도)",
-                       glasses_lead_html("아침기도", date_str, gen_at)
+                       glasses_lead_html("성무일도", "아침기도", date_str, gen_at)
                        + text_to_paragraphs_html(lit_morning), date_str, gen_at)
     write_section_page("02-liturgy-evening.html", "오늘의 성무일도 (저녁기도)",
-                       glasses_lead_html("저녁기도", date_str, gen_at)
+                       glasses_lead_html("성무일도", "저녁기도", date_str, gen_at)
                        + text_to_paragraphs_html(lit_evening), date_str, gen_at)
     write_section_page("02-liturgy-night.html", "오늘의 성무일도 (끝기도)",
-                       glasses_lead_html("끝기도", date_str, gen_at)
+                       glasses_lead_html("성무일도", "끝기도", date_str, gen_at)
                        + text_to_paragraphs_html(lit_night), date_str, gen_at)
 
     # ── 3. 오늘의 복음 ──
@@ -838,33 +865,33 @@ def build_glasses_pages(report):
         if not g:
             return "<p>정보 없음</p>"
         parts = []
-        if g.get("reading1"):
-            parts.append("<h2>제1독서</h2>")
-            parts.append(text_to_paragraphs_html(g["reading1"]))
-        if g.get("reading2"):
-            parts.append("<h2>제2독서</h2>")
-            parts.append(text_to_paragraphs_html(g["reading2"]))
-        if g.get("gospel"):
-            parts.append("<h2>복음</h2>")
-            parts.append(text_to_paragraphs_html(g["gospel"]))
+        for field, label in (("reading1", "제1독서"),
+                             ("reading2", "제2독서"),
+                             ("gospel",   "복음")):
+            if g.get(field):
+                parts.append(f"<h2>{label}</h2>")
+                parts.append(
+                    text_to_paragraphs_html(strip_leading_label(g[field], label)))
         return "\n".join(parts) if parts else "<p>정보 없음</p>"
 
     write_section_page("03-gospel.html", "오늘의 복음",
-                       gospel_to_html(report.get("gospel")), date_str, gen_at)
+                       glasses_lead_html("복음", "오늘의 복음", date_str, gen_at)
+                       + gospel_to_html(report.get("gospel")), date_str, gen_at)
 
     # ── 4. 내일의 복음 ──
     write_section_page("04-gospel-tomorrow.html", "내일의 복음",
-                       gospel_to_html(report.get("gospel_tomorrow")), date_str, gen_at)
+                       glasses_lead_html("복음", "내일의 복음", date_str, gen_at)
+                       + gospel_to_html(report.get("gospel_tomorrow")), date_str, gen_at)
 
     # ── 4-1. 주일의 복음 (다가올 일요일) ──
     # 제목은 다른 메뉴와 동일하게 "주일의 복음"만. (write_section_page가
     # 자동으로 뒤에 (생성날짜)를 붙이므로 여기서 날짜를 넣으면 괄호가 중복되어
     # Glance가 제목을 파싱하지 못함.) 대신 다가올 일요일 날짜는 본문 맨 위에 표시.
     sunday_date_str = report.get("gospel_next_sunday_date", "")
-    sunday_body = gospel_to_html(report.get("gospel_next_sunday"))
-    if sunday_date_str:
-        sunday_body = (f'<p class="meta">해당 주일: {html_escape(sunday_date_str)}</p>\n'
-                       + sunday_body)
+    sunday_extra = f"해당 주일 {sunday_date_str}" if sunday_date_str else ""
+    sunday_body = (glasses_lead_html("복음", "주일의 복음", date_str, gen_at,
+                                     extra=sunday_extra)
+                   + gospel_to_html(report.get("gospel_next_sunday")))
     write_section_page("07-gospel-sunday.html", "주일의 복음",
                        sunday_body, date_str, gen_at)
 
